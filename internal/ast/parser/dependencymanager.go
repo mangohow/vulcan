@@ -2,35 +2,44 @@ package parser
 
 import (
 	"fmt"
+	"github.com/mangohow/mangokit/tools/stream"
+	"github.com/mangohow/vulcan/internal/ast/parser/types"
+	"github.com/mangohow/vulcan/internal/utils"
 	"go/ast"
 	"go/token"
 	"golang.org/x/tools/go/packages"
-	"os"
-	"path/filepath"
+	"strings"
 )
 
 // DependencyManager 依赖管理器
 // 管理导入的依赖
 type DependencyManager struct {
 	fset          *token.FileSet
-	declaredTypes map[string]map[string]*ast.TypeSpec // 声明的类型 包名 类型名 类型
+	declaredTypes map[string]map[string]*TypeInfo // 声明的类型 包名 类型名 类型
+}
+
+type TypeInfo struct {
+	AstType     *ast.TypeSpec      // ast
+	FilePath    string             // 所属文件
+	PackagePath string             // 所属包
+	Imports     []types.ImportInfo // 导入的包
 }
 
 func NewDependencyManager(fset *token.FileSet) *DependencyManager {
 	return &DependencyManager{
 		fset:          fset,
-		declaredTypes: make(map[string]map[string]*ast.TypeSpec),
+		declaredTypes: make(map[string]map[string]*TypeInfo),
 	}
 }
 
-// GetTypeSpec 获取类型声明信息
+// GetTypeInfo 获取类型声明信息
 // param:
 //
 //	filePath: 当前分析的文件路径
 //	pkg: 类型的包名
 //	typeName: 类型名称
-func (m *DependencyManager) GetTypeSpec(filePath, pkg, typeName string) (*ast.TypeSpec, error) {
-	spec := m.getTypeSpec(pkg, typeName)
+func (m *DependencyManager) GetTypeInfo(filePath, pkg, typeName string) (*TypeInfo, error) {
+	spec := m.getTypeInfo(pkg, typeName)
 	if spec != nil {
 		return spec, nil
 	}
@@ -40,10 +49,10 @@ func (m *DependencyManager) GetTypeSpec(filePath, pkg, typeName string) (*ast.Ty
 		return nil, err
 	}
 
-	return m.getTypeSpec(pkg, typeName), nil
+	return m.getTypeInfo(pkg, typeName), nil
 }
 
-// getTypeSpec 用于获取指定包中指定类型的名字的类型定义。
+// getTypeInfo 用于获取指定包中指定类型的名字的类型定义。
 // 此函数主要用于在已缓存的类型信息中查找特定类型定义。
 // 参数:
 //
@@ -54,7 +63,7 @@ func (m *DependencyManager) GetTypeSpec(filePath, pkg, typeName string) (*ast.Ty
 //
 //	如果找到了对应的类型定义，则返回指向该类型定义的指针。
 //	如果没有找到，则返回 nil。
-func (m *DependencyManager) getTypeSpec(pkg, typeName string) *ast.TypeSpec {
+func (m *DependencyManager) getTypeInfo(pkg, typeName string) *TypeInfo {
 	// 检查在已声明的类型缓存中是否存在指定的包。
 	if pkgCache, ok := m.declaredTypes[pkg]; ok {
 		// 检查在该包的缓存中是否存在指定的类型名称。
@@ -82,7 +91,7 @@ func (m *DependencyManager) getTypeSpec(pkg, typeName string) *ast.TypeSpec {
 //	如果加载或解析过程中发生错误，返回该错误。
 func (m *DependencyManager) loadDependency(filePath, pkgName, structName string) error {
 	// 寻找模块根目录
-	p, err := findModuleRoot(filePath)
+	p, err := utils.FindGoModuleRoot(filePath)
 	if err != nil {
 		return fmt.Errorf("find go.mod error, %v", err)
 	}
@@ -104,12 +113,13 @@ func (m *DependencyManager) loadDependency(filePath, pkgName, structName string)
 	// 初始化或获取包的缓存
 	pkgCache, ok := m.declaredTypes[pkgName]
 	if !ok {
-		pkgCache = make(map[string]*ast.TypeSpec)
+		pkgCache = make(map[string]*TypeInfo)
+		m.declaredTypes[pkgName] = pkgCache
 	}
 
 	// 遍历包内所有文件AST
 	for _, pkg := range pkgs {
-		for _, file := range pkg.Syntax {
+		for j, file := range pkg.Syntax {
 			for _, decl := range file.Decls {
 				// 查找类型声明节点
 				genDecl, ok := decl.(*ast.GenDecl)
@@ -126,37 +136,23 @@ func (m *DependencyManager) loadDependency(filePath, pkgName, structName string)
 
 					// 保存到cache
 					typeName := typeSpec.Name.Name
-					pkgCache[typeName] = typeSpec
+					pkgCache[typeName] = &TypeInfo{
+						AstType:     typeSpec,
+						FilePath:    pkg.GoFiles[j],
+						PackagePath: pkg.PkgPath,
+						Imports: stream.Map(file.Imports, func(importSpec *ast.ImportSpec) types.ImportInfo {
+							res := types.ImportInfo{}
+							if importSpec.Name != nil {
+								res.Name = importSpec.Name.Name
+							}
+							res.AbsPackagePath = strings.Trim(`"`, importSpec.Path.Value)
+							return res
+						}),
+					}
 				}
 			}
 		}
 	}
 
 	return nil
-}
-
-// findModuleRoot 用于查找从给定目录开始的 Go 模块根目录。
-// 它通过向上遍历目录树，直到找到 go.mod 文件或到达文件系统的根目录为止。
-// 参数:
-//
-//	dir (string): 开始搜索的目录路径。
-//
-// 返回值:
-//
-//	string: Go 模块的根目录路径。
-//	error: 如果没有找到 go.mod 文件，则返回错误。
-func findModuleRoot(dir string) (string, error) {
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir, nil
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-
-	return "", fmt.Errorf("go.mod not found")
 }

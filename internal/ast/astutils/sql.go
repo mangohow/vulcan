@@ -137,9 +137,13 @@ func BuildReturnStmt(returnArgs ...interface{}) *ast.ReturnStmt {
 	for _, arg := range returnArgs {
 		switch v := arg.(type) {
 		case string:
-			results = append(results, ast.NewIdent(v))
+			results = append(results, BuildBasicLit(gotoken.STRING, v))
 		case int, int64, int32, int16, int8, uint, uint64, uint32, uint16, uint8:
 			results = append(results, BuildBasicLit(gotoken.INT, fmt.Sprintf("%d", v)))
+		case bool:
+			results = append(results, ast.NewIdent("false"))
+		case float32, float64:
+			results = append(results, BuildBasicLit(gotoken.FLOAT, fmt.Sprintf("%f", v)))
 		}
 	}
 

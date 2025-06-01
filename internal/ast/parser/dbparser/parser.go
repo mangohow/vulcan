@@ -5,14 +5,24 @@ import (
 	"errors"
 	"fmt"
 	"github.com/mangohow/mangokit/tools/collection"
+	"github.com/mangohow/mangokit/tools/stream"
 	"github.com/mangohow/vulcan/internal/ast/astutils"
 	"github.com/mangohow/vulcan/internal/ast/parser"
 	"github.com/mangohow/vulcan/internal/ast/parser/types"
+	"github.com/mangohow/vulcan/internal/utils"
 	"go/ast"
 	astparser "go/parser"
 	"go/token"
 	"os"
+	"reflect"
+	"slices"
 	"strings"
+)
+
+const (
+	dbOperatorPackageName = "github.com/jmoiron/sqlx"
+	dbOperatorRefName     = "sqlx"
+	dbOperatorTypeName    = "DB"
 )
 
 type FileParser struct {
@@ -20,6 +30,9 @@ type FileParser struct {
 	dependencyManager *parser.DependencyManager
 	filterPackages    []string // 生成的代码中需要过滤掉的package
 	addPackages       []string // 生成的代码中需要添加的package
+	necessaryPackages []string // 必须要导入的包
+	typeParser        *TypeParser
+	typeDeclarations  []*ast.TypeSpec
 }
 
 func NewFileParser(fst *token.FileSet, dm *parser.DependencyManager) *FileParser {
@@ -32,6 +45,10 @@ func NewFileParser(fst *token.FileSet, dm *parser.DependencyManager) *FileParser
 		addPackages: []string{
 			"github.com/mangohow/vulcan/db",
 		},
+		necessaryPackages: []string{
+			dbOperatorPackageName,
+		},
+		typeParser: NewTypeParser(dm),
 	}
 }
 
@@ -52,6 +69,15 @@ func (p *FileParser) Parse(filename string) (*types.File, error) {
 	// 处理导入的包
 	packageInfo := p.parseImports(f, filename)
 	//log.Infof("parsed package info: %s", packageInfo.String())
+	currentPkg, err := utils.GetCurrentPackagePath(filename)
+	if err != nil {
+		return nil, err
+	}
+	packageInfo.PackagePath = currentPkg
+
+	if err := p.checkNecessaryPackageImport(packageInfo.Imports); err != nil {
+		return nil, err
+	}
 
 	// 对包进行过滤, 如果没有包含注解相关的包, 则不生成代码
 	for _, pkg := range p.filterPackages {
@@ -61,12 +87,27 @@ func (p *FileParser) Parse(filename string) (*types.File, error) {
 	}
 
 	fileInfo := &types.File{
+		AstFile: f,
 		PkgInfo: packageInfo,
 	}
 	// 处理类型、函数声明
 	if err := p.parseDeclares(f, fileInfo); err != nil {
 		return nil, fmt.Errorf("parse declares eror, %v", err)
 	}
+
+	for i := 0; i < len(fileInfo.Declarations); i++ {
+		fileInfo.Declarations[i].PkgInfo = packageInfo
+	}
+
+	// 处理包导入信息
+	fileInfo.PkgInfo.AstImports = stream.Filter(fileInfo.PkgInfo.AstImports, func(spec *ast.ImportSpec) bool {
+		return !slices.Contains(p.filterPackages, strings.Trim(spec.Path.Value, `"`))
+	})
+	fileInfo.PkgInfo.AstImports = append(fileInfo.PkgInfo.AstImports, stream.Map(p.addPackages, func(name string) *ast.ImportSpec {
+		return &ast.ImportSpec{
+			Path: astutils.BuildBasicLit(token.STRING, fmt.Sprintf("%q", name)),
+		}
+	})...)
 
 	return fileInfo, nil
 }
@@ -79,6 +120,7 @@ func (p *FileParser) parseImports(af *ast.File, filepath string) types.PackageIn
 		AstImports:  af.Imports,
 		ImportsMap:  make(map[string]string),
 	}
+
 	for _, imp := range af.Imports {
 		impInfo := types.ImportInfo{}
 		if imp.Path != nil {
@@ -94,8 +136,38 @@ func (p *FileParser) parseImports(af *ast.File, filepath string) types.PackageIn
 	return pkg
 }
 
+// 检查必要的包导入情况
+func (p *FileParser) checkNecessaryPackageImport(imports []types.ImportInfo) error {
+	for _, name := range p.necessaryPackages {
+		_, exist := utils.Find(imports, func(info types.ImportInfo) bool {
+			return info.AbsPackagePath == name
+		})
+		if !exist {
+			return fmt.Errorf("package %s is not imported", name)
+		}
+	}
+
+	return nil
+}
+
 // 解析所有声明
 func (p *FileParser) parseDeclares(af *ast.File, file *types.File) error {
+	// 先解析出当前文件中的type定义
+	for _, decl := range af.Decls {
+		genDecl, ok := decl.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+
+		for _, spec := range genDecl.Specs {
+			ts, ok := spec.(*ast.TypeSpec)
+			if !ok {
+				continue
+			}
+			p.typeDeclarations = append(p.typeDeclarations, ts)
+		}
+	}
+
 	for _, decl := range af.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
@@ -111,6 +183,12 @@ func (p *FileParser) parseDeclares(af *ast.File, file *types.File) error {
 				file.AddAstDecl(decl) // 如果没用注解, 则该函数无需处理, 直接添加ast
 			}
 		case *ast.GenDecl:
+			if len(d.Specs) > 0 {
+				if _, ok := d.Specs[0].(*ast.ImportSpec); ok {
+					continue
+				}
+			}
+
 			file.AddAstDecl(d)
 			// TODO 解析类型定义
 
@@ -130,10 +208,11 @@ func (p *FileParser) parseFuncDeclare(fd *ast.FuncDecl, pkgInfo types.PackageInf
 		OutputParam: make(map[string]*types.Param),
 		FuncName:    fd.Name.Name,
 	}
-	callExpr := astutils.FindCallsInFuncBody(types.SQLAnnotationFuncs, types.AnnotationPackageName, fd.Body, pkgInfo)
+	callExpr, annoName := astutils.FindCallsInFuncBody(types.SQLAnnotationFuncs, types.AnnotationPackageName, fd.Body, pkgInfo)
 	if callExpr == nil {
 		return nil, nil
 	}
+	res.Annotation = annoName
 
 	// 解析注解
 	// 1. 先处理接收器
@@ -143,34 +222,21 @@ func (p *FileParser) parseFuncDeclare(fd *ast.FuncDecl, pkgInfo types.PackageInf
 	}
 
 	// 判断接收器是否为结构体, 并且包含sqlx.DB对象
-	if err := p.checkReceiverInvalid(fd.Recv.List[0]); err != nil {
+	if err := p.checkReceiverInvalid(fd.Recv.List[0], res); err != nil {
 		return nil, err
 	}
 
 	// 2. 处理入参
-	if err := p.parseInputParameter(fd.Type.Params.List, res); err != nil {
+	if err := p.parseInputParameter(fd.Type.Params.List, res, pkgInfo); err != nil {
 		return nil, err
 	}
 
-	// 3. 检查出参, 出参数量只有1或2个
-	if results := fd.Type.Results.List; len(results) < 1 || len(results) > 2 {
-		return nil, errors.New("function must return 1 or 2 results, and the last must be error type")
-	}
-
-	// 检查出参类型
-	// 查询时: 第一个为结构体或基本类型
-	// 增删改: 第一个参数为Number类型(int, int64, ..., uint, uint64...), 或只有一个error参数
-	// 第二个为error类型
-	if err := p.checkOutputParameterInvalid(fd.Type.Results.List); err != nil {
+	// 3. 处理出参
+	if err := p.parseOutputParameter(fd.Type.Results.List, res, pkgInfo); err != nil {
 		return nil, err
 	}
 
-	// 4. 处理出参
-	if err := p.parseOutputParameter(fd.Type.Results.List, res); err != nil {
-		return nil, err
-	}
-
-	// 5. 处理函数体
+	// 4. 处理函数体
 	if err := p.parseFuncBody(fd.Body, res, pkgInfo); err != nil {
 		return nil, err
 	}
@@ -178,19 +244,264 @@ func (p *FileParser) parseFuncDeclare(fd *ast.FuncDecl, pkgInfo types.PackageInf
 	return res, nil
 }
 
-func (p *FileParser) checkReceiverInvalid(receiver *ast.Field) error {
+func (p *FileParser) checkReceiverInvalid(receiver *ast.Field, fnDecl *types.FuncDecl) error {
+	expr := receiver.Type
+	name := ""
+	fnDecl.Receiver = &types.Param{
+		Name: receiver.Names[0].Name,
+	}
+	receiverType := &fnDecl.Receiver.Type
+loop:
+	for {
+		// 检查receiver中是否包含*sqlx.db
+		switch typeSpec := expr.(type) {
+		case *ast.StarExpr: // 指针接收者
+			expr = typeSpec.X
+			receiverType.Kind = reflect.Pointer
+			receiverType.ValueType = &types.TypeSpec{
+				Kind: reflect.Struct,
+			}
+			receiverType = receiverType.ValueType
+		case *ast.Ident: // 值接收者
+			name = typeSpec.Name
+			break loop
+		}
+	}
+
+	if len(receiver.Names) == 0 || receiver.Names[0].Name == "_" {
+		return fmt.Errorf("receiver must have a name")
+	}
+
+	receiverType.Name = name
+
+	ts, ok := utils.Find(p.typeDeclarations, func(spec *ast.TypeSpec) bool {
+		return spec.Name.Name == name
+	})
+	if !ok {
+		return fmt.Errorf("type %s not found", name)
+	}
+
+	st, ok := ts.Type.(*ast.StructType)
+	if !ok {
+		return fmt.Errorf("receiver must be struct type")
+	}
+
+	if st.Fields == nil {
+		return fmt.Errorf("type %s must have field *sqlx.DB", name)
+	}
+
+	for _, field := range st.Fields.List {
+		starExpr, ok := field.Type.(*ast.StarExpr)
+		if !ok {
+			continue
+		}
+		se, ok := starExpr.X.(*ast.SelectorExpr)
+		if !ok {
+			continue
+		}
+		if ident, ok := se.X.(*ast.Ident); ok && ident.Name == dbOperatorRefName && se.Sel.Name == dbOperatorTypeName {
+			if len(field.Names) == 0 || field.Names[0].Name == "_" {
+				return fmt.Errorf("field sqlx.DB must have a name")
+			}
+
+			receiverType.Fields = append(receiverType.Fields, &types.Param{
+				Name: field.Names[0].Name,
+				Type: types.TypeSpec{
+					Kind: reflect.Pointer,
+					ValueType: &types.TypeSpec{
+						Name: dbOperatorTypeName,
+						Package: &types.PackageInfo{
+							PackageName: dbOperatorRefName,
+							PackagePath: dbOperatorPackageName,
+						},
+						Kind: reflect.Struct,
+					},
+				},
+			})
+
+			return nil
+		}
+	}
+
+	return fmt.Errorf("can't find any field type is sqlx.DB")
+}
+
+// 解析入参数据类型
+func (p *FileParser) parseInputParameter(params []*ast.Field, res *types.FuncDecl, pkgInfo types.PackageInfo) error {
+	var (
+		err         error
+		inputParams = make(map[string]*types.Param)
+	)
+
+	stream.ForEach(params, func(field *ast.Field) bool {
+		paramList := make([]*types.Param, len(field.Names))
+		for i := range field.Names {
+			paramList[i] = &types.Param{
+				Name: field.Names[i].Name,
+			}
+		}
+
+		var param types.Param
+		if err = p.parseFieldExpr(field.Type, &param, pkgInfo); err != nil {
+			return false
+		}
+
+		for i := range paramList {
+			paramList[i].Type = param.Type
+			inputParams[paramList[i].Name] = paramList[i]
+		}
+
+		return true
+	})
+
+	if err != nil {
+		return err
+	}
+
+	res.InputParam = inputParams
+
 	return nil
 }
 
-func (p *FileParser) parseInputParameter(params []*ast.Field, res *types.FuncDecl) error {
+func (p *FileParser) parseFieldExpr(expr ast.Expr, typeParam *types.Param, pkgInfo types.PackageInfo) error {
+	var (
+		typeSpec    = &typeParam.Type
+		typeName    string
+		typePkgName string
+		typeInfo    *TypeInfo
+		isPointer   = false
+		err         error
+	)
+
+loop:
+	for {
+		switch et := expr.(type) {
+		case *ast.Ident:
+			typeName = et.Name
+			break loop
+		case *ast.SelectorExpr:
+			i, ok := et.X.(*ast.Ident)
+			if !ok {
+				return fmt.Errorf("unsupported input parameter type: %s", typeParam.Name)
+			}
+			typeName = et.Sel.Name
+			typePkgName = i.Name
+			break loop
+		case *ast.StarExpr:
+			if isPointer {
+				return fmt.Errorf("unsupported multi level pointer")
+			}
+			typeSpec.Kind = reflect.Pointer
+			typeSpec.ValueType = &types.TypeSpec{}
+			typeSpec = typeSpec.ValueType
+			isPointer = true
+			expr = et.X
+		case *ast.ArrayType:
+			if isPointer {
+				return fmt.Errorf("unsupported pointer slice type")
+			}
+			typeSpec.Kind = reflect.Slice
+			typeSpec.ValueType = &types.TypeSpec{}
+			typeSpec = typeSpec.ValueType
+			expr = et.Elt
+		default:
+			return fmt.Errorf("unsupported input parameter type: %s", typeParam.Name)
+		}
+	}
+
+	if typePkgName == "" {
+		// 普通类型
+		if rn, ok := kindNames[typeName]; ok {
+			typeSpec.Name = typeName
+			typeSpec.Kind = rn
+		} else {
+			// 本包的结构体, 不允许
+			return fmt.Errorf("can't use types %s in %s", typeName, pkgInfo.PackagePath)
+		}
+	} else {
+		// 其他包的结构体, 进行解析
+		found, ok := utils.Find(pkgInfo.Imports, func(info types.ImportInfo) bool {
+			return utils.GetPackageName(info.AbsPackagePath) == typePkgName
+		})
+		if !ok {
+			return fmt.Errorf("can't find %s.%s's type declartion", typePkgName, typeName)
+		}
+
+		typeInfo, err = p.typeParser.GetTypeInfo(pkgInfo.FilePath, found.AbsPackagePath, typeName)
+		if err != nil {
+			return fmt.Errorf("can't find type %s.%s's declartion, %w", typePkgName, typeName, err)
+		}
+
+		*typeSpec = *typeInfo.Type
+	}
+
 	return nil
 }
 
-func (p *FileParser) checkOutputParameterInvalid(params []*ast.Field) error {
+// 解析出参数据类型
+// 出参的数量为1~2个
+// 如果只有一个参数那么必须是error
+// 如果有两个参数, 第二个必须是error, 第一个参数可以为结构体、结构体指针、切片（切片元素为结构体、切片元素为结构体指针、基本类型）、基本类型）
+// 第一个参数不能为基本类型的指针, 没有意义
+func (p *FileParser) parseOutputParameter(params []*ast.Field, fnDecl *types.FuncDecl, pkgInfo types.PackageInfo) error {
+	// 检查出参类型
+	// 查询时: 第一个为结构体、基本类型、切片或指针
+	// 增删改: 第一个参数为Number类型(int, int64, ..., uint, uint64...), 或只有一个error参数
+	// 第二个为error类型
+	if len(params) < 1 || len(params) > 2 {
+		return fmt.Errorf("function must return 1 or 2 results, and the last must be error type")
+	}
+	n := 0
+	for _, field := range params {
+		n += len(field.Names)
+	}
+
+	if n > 2 {
+		return fmt.Errorf("function must return 1 or 2 results, and the last must be error type")
+	}
+
+	errField := params[0]
+	if len(params) == 2 {
+		errField = params[1]
+	}
+	if err := p.checkErrOutputParameter(errField); err != nil {
+		return err
+	}
+
+	if len(params) == 1 {
+		return nil
+	}
+
+	paramType := &types.Param{}
+	if len(params[0].Names) > 0 && params[0].Names[0] != nil {
+		paramType.Name = params[0].Names[0].Name
+	}
+	if err := p.parseFieldExpr(params[0].Type, paramType, pkgInfo); err != nil {
+		return err
+	}
+
+	fnDecl.FuncReturnResultParam = paramType
+
+	if fnDecl.Annotation == types.SQLSelectFunc {
+		return nil
+	}
+
+	// 增删改, 第一个参数必须为int或uint族类型
+	switch paramType.Type.Kind {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+	default:
+		return fmt.Errorf("invalid output parameter %s", paramType.Type.Kind)
+	}
+
 	return nil
 }
 
-func (p *FileParser) parseOutputParameter(params []*ast.Field, fnDecl *types.FuncDecl) error {
+func (p *FileParser) checkErrOutputParameter(field *ast.Field) error {
+	ident, ok := field.Type.(*ast.Ident)
+	if !ok || ident.Name != "error" {
+		return fmt.Errorf("function must return 1 or 2 results, and the last must be error type")
+	}
+
 	return nil
 }
 

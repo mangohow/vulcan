@@ -35,7 +35,7 @@ func TestPaginationInterceptor(t *testing.T) {
 	SetupPaginationInterceptor()
 
 	paging := NewPaging(1, 10).AddDescs("create_time")
-	paginationInterceptor(&ExecOption{
+	paginationInterceptor.PreHandle(&ExecOption{
 		SqlStmt:  "SELECT username, password FROM t_user WHERE id > ?",
 		Execer:   fakeExecer{},
 		FirstArg: paging,

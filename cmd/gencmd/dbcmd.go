@@ -1,6 +1,7 @@
 package gencmd
 
 import (
+	"github.com/mangohow/vulcan/internal/ast/generator/dbgenerator"
 	parser2 "github.com/mangohow/vulcan/internal/ast/parser"
 	"github.com/mangohow/vulcan/internal/ast/parser/dbparser"
 	"github.com/mangohow/vulcan/internal/log"
@@ -8,6 +9,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 var DbCmd = &cobra.Command{
@@ -38,7 +40,13 @@ func generate(path string) error {
 	if err != nil {
 		return err
 	}
-	_ = parsedFile
+
+	idx := strings.Index(path, ".")
+	newFileName := path[:idx] + "_gen" + path[idx:]
+	generator := dbgenerator.NewFileGenerator(parsedFile)
+	if err := generator.Execute(newFileName); err != nil {
+		return err
+	}
 
 	return nil
 }

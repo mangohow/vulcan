@@ -3,12 +3,14 @@ package astutils
 import (
 	"bytes"
 	"fmt"
+	"github.com/mangohow/vulcan/internal/ast/parser/types"
 	"go/ast"
 	"go/format"
 	"go/parser"
 	"go/token"
 	"log"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -29,7 +31,7 @@ func ParseAst(src, dst string) error {
 	if err != nil {
 		log.Fatal(err)
 	}
-	return ast.Fprint(file, fileSet, f.Decls, nil)
+	return ast.Fprint(file, fileSet, f, nil)
 }
 
 func TestParseAst(t *testing.T) {
@@ -166,4 +168,122 @@ func TestBuildAddSqlExe(t *testing.T) {
 func TestBuildSqlForRangeStmt(t *testing.T) {
 	printSource(BuildSqlForRangeStmt("i", "user", "users", "args",
 		"builder", "(?, ?, ?)", ",", []string{"user.Name", "user.Password", "user.Email"}))
+}
+
+func TestBuildInitAssignExpr(t *testing.T) {
+	p1 := types.Param{
+		Type: types.TypeSpec{
+			Name: "User",
+			Package: &types.PackageInfo{
+				PackageName: "model",
+			},
+			Kind: reflect.Struct,
+		},
+	}
+	printSource(BuildInitAssignExpr(&p1, []string{"res"}, "mapper"))
+	p2 := types.Param{
+		Type: types.TypeSpec{
+			Name: "User",
+			Package: &types.PackageInfo{
+				PackageName: "model",
+			},
+			Kind: reflect.Struct,
+		},
+	}
+	printSource(BuildInitAssignExpr(&p2, []string{"res"}, "model"))
+	p3 := types.Param{
+		Type: types.TypeSpec{
+			Kind: reflect.Int,
+		},
+	}
+	printSource(BuildInitAssignExpr(&p3, []string{"res"}, ""))
+	p4 := types.Param{
+		Type: types.TypeSpec{
+			Kind: reflect.String,
+		},
+	}
+	printSource(BuildInitAssignExpr(&p4, []string{"res"}, ""))
+	p5 := types.Param{
+		Type: types.TypeSpec{
+			Kind: reflect.Int32,
+		},
+	}
+	printSource(BuildInitAssignExpr(&p5, []string{"res"}, ""))
+	p6 := types.Param{
+		Type: types.TypeSpec{
+			Kind: reflect.Float32,
+		},
+	}
+	printSource(BuildInitAssignExpr(&p6, []string{"res"}, ""))
+	p7 := types.Param{
+		Type: types.TypeSpec{
+			Kind: reflect.Bool,
+		},
+	}
+	printSource(BuildInitAssignExpr(&p7, []string{"res"}, ""))
+
+	p8 := types.Param{
+		Type: types.TypeSpec{
+			Kind: reflect.Pointer,
+			ValueType: &types.TypeSpec{
+				Name: "User",
+				Package: &types.PackageInfo{
+					PackageName: "model",
+				},
+				Kind: reflect.Struct,
+			},
+		},
+	}
+	printSource(BuildInitAssignExpr(&p8, []string{"res"}, "mapper"))
+
+	p9 := types.Param{
+		Type: types.TypeSpec{
+			Kind: reflect.Slice,
+			ValueType: &types.TypeSpec{
+				Name: "User",
+				Package: &types.PackageInfo{
+					PackageName: "model",
+				},
+				Kind: reflect.Struct,
+			},
+		},
+	}
+	printSource(BuildInitAssignExpr(&p9, []string{"res"}, "mapper"))
+
+	p10 := types.Param{
+		Type: types.TypeSpec{
+			Kind: reflect.Pointer,
+			ValueType: &types.TypeSpec{
+				Kind: reflect.Slice,
+				ValueType: &types.TypeSpec{
+					Name: "User",
+					Package: &types.PackageInfo{
+						PackageName: "model",
+					},
+					Kind: reflect.Struct,
+				},
+			},
+		},
+	}
+	printSource(BuildInitAssignExpr(&p10, []string{"res"}, "mapper"))
+
+	p11 := types.Param{
+		Type: types.TypeSpec{
+			Kind: reflect.Slice,
+			ValueType: &types.TypeSpec{
+				Kind: reflect.Int,
+			},
+		},
+	}
+	printSource(BuildInitAssignExpr(&p11, []string{"res"}, "mapper"))
+
+	p12 := types.Param{
+		Type: types.TypeSpec{
+			Kind: reflect.Slice,
+			ValueType: &types.TypeSpec{
+				Kind: reflect.String,
+			},
+		},
+	}
+	printSource(BuildInitAssignExpr(&p12, []string{"res"}, "mapper"))
 }

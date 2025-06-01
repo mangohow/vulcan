@@ -3,11 +3,45 @@
 package mapper
 
 import (
+	"fmt"
 	"github.com/jmoiron/sqlx"
 	"github.com/mangohow/vulcan"
 	"github.com/mangohow/vulcan/internal/example/model"
 	"strings"
+	"time"
 )
+
+type Int int
+
+type String string
+
+type Interface interface {
+}
+
+type MyTime time.Time
+
+type Fn func()
+
+type Slice []int
+
+type Pointer *int
+
+type TestStruct1 struct {
+	t1 int
+	t2 string
+}
+
+type TestStruct2 struct {
+	s1 int
+	s2 uint
+	s3 bool
+	s4 string
+	s5 float64
+	s6 []byte
+	s7 []int
+	s8 TestStruct1
+	s9 *TestStruct1
+}
 
 type UserMapper struct {
 	db *sqlx.DB
@@ -36,16 +70,42 @@ func (m *UserMapper) Add(user *model.User, opts ...vulcan.Option) error {
 	if err != nil {
 		return err
 	}
-
 	user.Id = id
 
 	return nil
 }
 
+func (m *UserMapper) Add1(user *model.User, opts ...vulcan.Option) (int, error) {
+	option := &vulcan.ExecOption{
+		SqlStmt: "INSERT INTO t_user (id, username, password, create_at, email, address) VALUES (?, ?, ?, ?, ?, ?)",
+		Args:    []any{user.Id, user.Username, user.Password, user.CreatedAt, user.Email, user.Address},
+		Execer:  m.db,
+	}
+	vulcan.InvokePreHandler(option, opts...)
+	result, err := option.Exec(option.SqlStmt, option.Args...)
+	vulcan.InvokePostHandler(vulcan.NewResultOption(vulcan.SQLTypeInsert, nil, err, result))
+	if err != nil {
+		return 0, err
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	user.Id = id
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+
+	return int(affected), nil
+}
+
 func (m *UserMapper) DeleteById(id int, opts ...vulcan.Option) (int, error) {
 	option := &vulcan.ExecOption{
 		SqlStmt: "DELETE FROM t_user WHERE id = ?",
-		Args:    nil,
+		Args:    []any{id},
 		Execer:  m.db,
 	}
 	vulcan.InvokePreHandler(option, opts...)
@@ -307,4 +367,21 @@ func test() {
 	u1 := &m
 	u2 := *u1
 	_ = u2
+
+	res1 := model.User{}
+	res2 := &model.User{}
+	res3 := []model.User{}
+	res4 := []*model.User{}
+	res5 := 0
+	res6 := int64(0)
+	res7 := ""
+	res8 := 0.0
+	res9 := true
+	res10 := []int{}
+	fmt.Println(res1, res2, res3, res4, res5, res6, res7, res8, res9, res10)
+}
+
+func test1() (string, error) {
+	var err error
+	return "", err
 }

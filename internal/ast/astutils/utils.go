@@ -3,10 +3,12 @@ package astutils
 import (
 	"fmt"
 	"github.com/mangohow/mangokit/tools/collection"
+	"github.com/mangohow/mangokit/tools/stream"
 	"github.com/mangohow/vulcan/internal/ast/parser/types"
 	"go/ast"
 	gotoken "go/token"
 	"path/filepath"
+	"reflect"
 )
 
 const (
@@ -213,7 +215,7 @@ func StringList(args ...string) []string {
 // FindCallsInFuncBody 在函数体中寻找函数调用
 // 例如FindCallInFuncBody("Select", "github.com/mangohow/vulcan/annocation", block, pkgInfo)
 // 为在block函数体中寻找包为github.com/mangohow/vulcan/annocation的Select函数调用
-func FindCallsInFuncBody(fnName []string, pkgName string, block *ast.BlockStmt, pkgInfo types.PackageInfo) *ast.CallExpr {
+func FindCallsInFuncBody(fnName []string, pkgName string, block *ast.BlockStmt, pkgInfo types.PackageInfo) (*ast.CallExpr, string) {
 	// 先查找包里面是否有目标包
 	var targetPkg *types.ImportInfo
 	for i, imp := range pkgInfo.Imports {
@@ -223,8 +225,9 @@ func FindCallsInFuncBody(fnName []string, pkgName string, block *ast.BlockStmt, 
 		}
 	}
 
+	var annoName string
 	if targetPkg == nil {
-		return nil
+		return nil, ""
 	}
 
 	var (
@@ -259,8 +262,10 @@ func FindCallsInFuncBody(fnName []string, pkgName string, block *ast.BlockStmt, 
 			}
 			name = i.Name
 			funcName = f.Sel.Name
+			annoName = funcName
 		case *ast.Ident:
 			funcName = f.Name
+			annoName = funcName
 		}
 
 		if set.Has(funcName) && (targetPkg.Name == "." || name == filepath.Base(pkgName)) {
@@ -272,7 +277,7 @@ func FindCallsInFuncBody(fnName []string, pkgName string, block *ast.BlockStmt, 
 		return true
 	})
 
-	return res
+	return res, annoName
 }
 
 func FindCallsInBlockStmt(fnName []string, pkgName string, block *ast.BlockStmt) (*ast.CallExpr, string) {
@@ -358,4 +363,99 @@ func BuildKeyValueExpr(key string, val ast.Expr) *ast.KeyValueExpr {
 		Colon: 0,
 		Value: val,
 	}
+}
+
+// BuildInitAssignExpr 构建定义表达式
+// res := model.User{}
+// res := User{}
+// res := 0
+// res := ""
+// res := int32(0)
+// res := float32(0.0)
+// res := false
+// res := &model.User{}
+// res := []model.User{}
+// res := []*model.User{}
+// res := []int{}
+// res := []string{}
+func BuildInitAssignExpr(param *types.Param, names []string, curPkgName string) *ast.AssignStmt {
+	assign := &ast.AssignStmt{
+		Lhs: stream.Map(names, func(v string) ast.Expr {
+			return BuildIdentOrSelectorExpr(v)
+		}),
+		Tok: gotoken.DEFINE,
+	}
+	var (
+		expr      ast.Expr
+		paramType = &param.Type
+		isPointer = false
+		isSlice   = false
+	)
+
+	if paramType.IsBasicType() {
+		switch paramType.Kind {
+		case reflect.Int:
+			expr = BuildBasicLit(gotoken.INT, "0")
+		case reflect.String:
+			expr = BuildBasicLit(gotoken.STRING, `""`)
+		case reflect.Bool:
+			expr = ast.NewIdent("false")
+		case reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			expr = &ast.CallExpr{
+				Fun:  ast.NewIdent(paramType.Kind.String()),
+				Args: []ast.Expr{BuildBasicLit(gotoken.INT, "0")},
+			}
+		case reflect.Float32, reflect.Float64:
+			expr = &ast.CallExpr{
+				Fun:  ast.NewIdent(paramType.Kind.String()),
+				Args: []ast.Expr{BuildBasicLit(gotoken.FLOAT, "0.0")},
+			}
+		}
+
+		assign.Rhs = []ast.Expr{expr}
+		return assign
+	}
+
+loop:
+	for {
+		switch {
+		case paramType.IsSlice():
+			isSlice = true
+			paramType = paramType.ValueType
+		case paramType.IsPointer():
+			isPointer = true
+			paramType = paramType.ValueType
+		case paramType.IsStruct():
+			name := paramType.Name
+			if paramType.Package.PackageName != curPkgName {
+				name = paramType.Package.PackageName + "." + name
+			}
+			expr = &ast.CompositeLit{
+				Type: BuildIdentOrSelectorExpr(name),
+			}
+			break loop
+		case paramType.IsBasicType():
+			expr = &ast.CompositeLit{
+				Type: ast.NewIdent(paramType.Kind.String()),
+			}
+			break loop
+		default:
+			break loop
+		}
+	}
+
+	if isPointer && isSlice {
+		expr = BuildUnaryExpr("*", expr)
+	} else if isPointer {
+		expr = BuildUnaryExpr("&", expr)
+	}
+
+	if isSlice {
+		expr = &ast.ArrayType{
+			Elt: expr,
+		}
+	}
+
+	assign.Rhs = []ast.Expr{expr}
+	return assign
 }
