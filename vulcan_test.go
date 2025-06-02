@@ -15,6 +15,10 @@ func (d debugLogger) Debug(format string, args ...any) {
 type fakeExecer struct {
 }
 
+func (f fakeExecer) Get(dest any, query string, args ...any) error {
+	return nil
+}
+
 func (f fakeExecer) Exec(query string, args ...any) (sql.Result, error) {
 	if len(args) > 0 {
 		arg := args[0]

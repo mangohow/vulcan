@@ -15,7 +15,6 @@ import (
 	"go/token"
 	"os"
 	"reflect"
-	"slices"
 	"strings"
 )
 
@@ -101,7 +100,7 @@ func (p *FileParser) Parse(filename string) (*types.File, error) {
 
 	// 处理包导入信息
 	fileInfo.PkgInfo.AstImports = stream.Filter(fileInfo.PkgInfo.AstImports, func(spec *ast.ImportSpec) bool {
-		return !slices.Contains(p.filterPackages, strings.Trim(spec.Path.Value, `"`))
+		return !utils.Contains(p.filterPackages, strings.Trim(spec.Path.Value, `"`))
 	})
 	fileInfo.PkgInfo.AstImports = append(fileInfo.PkgInfo.AstImports, stream.Map(p.addPackages, func(name string) *ast.ImportSpec {
 		return &ast.ImportSpec{
