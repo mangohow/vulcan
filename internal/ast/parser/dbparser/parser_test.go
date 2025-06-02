@@ -1,9 +1,7 @@
 package dbparser
 
 import (
-	"encoding/json"
 	"fmt"
-	parser2 "github.com/mangohow/vulcan/internal/ast/parser"
 	"github.com/mangohow/vulcan/internal/ast/parser/types"
 	"go/parser"
 	"go/token"
@@ -69,32 +67,4 @@ func TestParser(t *testing.T) {
 		}
 		fmt.Println()
 	}
-}
-
-func TestTypeParser(t *testing.T) {
-	dependencyManager := parser2.NewDependencyManager(token.NewFileSet())
-	filePath := "E:\\go_workspace\\src\\projects\\vulcan\\internal\\example\\db\\mapper\\usermapper_gen.go"
-	pkgName := "github.com/mangohow/vulcan/internal/example/model"
-	typeName := "User"
-	typeParser := NewTypeParser(dependencyManager)
-	info, err := typeParser.GetTypeInfo(&AdditionalOption{
-		FilePath: filePath,
-		PkgPath:  pkgName,
-		TypeName: typeName,
-		Imports: []types.ImportInfo{
-			{
-				AbsPackagePath: "time",
-				Name:           "time",
-			},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	content, err := json.MarshalIndent(info.Type, "", "    ")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fmt.Println(string(content))
 }

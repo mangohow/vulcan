@@ -431,7 +431,7 @@ func preprocessingStaticSqlGen(decl *types.Declaration, sql string) (*staticSqlG
 	case types.SQLSelectFunc:
 		sqlOperationName = dbGetOptName
 		if decl.SqlFuncDecl.FuncReturnResultParam.Type.IsSlice() {
-			sqlOperationName = dbExecOptName
+			sqlOperationName = dbSelectOptName
 		}
 		sqlExecuteResultName = sqlExecuteResultName[1:]
 		options.newResultOptionArgsName = append(options.newResultOptionArgsName, corePackageName+"."+sqlTypeSelectName, options.sqlOperationResultName, errName, nilName)
