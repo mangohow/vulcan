@@ -2,6 +2,7 @@ package vulcan
 
 import (
 	"database/sql"
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -13,6 +14,8 @@ type Execer interface {
 	Exec(query string, args ...any) (sql.Result, error)
 
 	Select(dest any, query string, args ...any) error
+
+	Get(dest any, query string, args ...any) error
 }
 
 type ExecOption struct {
@@ -55,6 +58,10 @@ func (e *ExecOption) Select(dest any, query string, args ...any) error {
 	return e.Execer.Select(dest, query, args...)
 }
 
+func (e *ExecOption) Get(dest any, query string, args ...any) error {
+	return e.Execer.Get(dest, query, args)
+}
+
 type Option func(*ExecOption)
 
 func WithTransaction(execer Execer) Option {
@@ -63,6 +70,17 @@ func WithTransaction(execer Execer) Option {
 	}
 }
 
-func StartTransaction() (*sql.Tx, error) {
-	return dbRef.Begin()
+func StartTransaction() (*sqlx.Tx, error) {
+	return dbRef.Beginx()
+}
+
+func OpenMysql(dataSourceName string) (*sqlx.DB, error) {
+	db, err := sqlx.Open("mysql", dataSourceName)
+	if err != nil {
+		return nil, err
+	}
+
+	dbRef = db
+
+	return db, nil
 }

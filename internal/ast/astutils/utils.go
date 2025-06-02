@@ -3,7 +3,6 @@ package astutils
 import (
 	"fmt"
 	"github.com/mangohow/mangokit/tools/collection"
-	"github.com/mangohow/mangokit/tools/stream"
 	"github.com/mangohow/vulcan/internal/ast/parser/types"
 	"go/ast"
 	gotoken "go/token"
@@ -348,20 +347,20 @@ func BuildEllipsisField(varName, typeName string) *ast.Field {
 }
 
 // BuildKeyValueBasicLitExpr 构建key: value
-func BuildKeyValueBasicLitExpr(key, val string, kind gotoken.Token) *ast.KeyValueExpr {
+func BuildKeyValueBasicLitExpr(key, val string, kind gotoken.Token, line gotoken.Pos) *ast.KeyValueExpr {
 	return &ast.KeyValueExpr{
 		Key:   ast.NewIdent(key),
-		Colon: 0,
 		Value: BuildBasicLit(kind, val),
+		Colon: line,
 	}
 }
 
 // BuildKeyValueExpr 构建key: value
-func BuildKeyValueExpr(key string, val ast.Expr) *ast.KeyValueExpr {
+func BuildKeyValueExpr(key string, val ast.Expr, line gotoken.Pos) *ast.KeyValueExpr {
 	return &ast.KeyValueExpr{
 		Key:   ast.NewIdent(key),
-		Colon: 0,
 		Value: val,
+		Colon: line,
 	}
 }
 
@@ -378,11 +377,9 @@ func BuildKeyValueExpr(key string, val ast.Expr) *ast.KeyValueExpr {
 // res := []*model.User{}
 // res := []int{}
 // res := []string{}
-func BuildInitAssignExpr(param *types.Param, names []string, curPkgName string) *ast.AssignStmt {
+func BuildInitAssignExpr(param *types.Param, name string, curPkgName string) *ast.AssignStmt {
 	assign := &ast.AssignStmt{
-		Lhs: stream.Map(names, func(v string) ast.Expr {
-			return BuildIdentOrSelectorExpr(v)
-		}),
+		Lhs: []ast.Expr{BuildIdentOrSelectorExpr(name)},
 		Tok: gotoken.DEFINE,
 	}
 	var (

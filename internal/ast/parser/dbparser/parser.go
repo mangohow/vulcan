@@ -43,7 +43,7 @@ func NewFileParser(fst *token.FileSet, dm *parser.DependencyManager) *FileParser
 			"github.com/mangohow/vulcan/annotation",
 		},
 		addPackages: []string{
-			"github.com/mangohow/vulcan/db",
+			"github.com/mangohow/vulcan",
 		},
 		necessaryPackages: []string{
 			dbOperatorPackageName,

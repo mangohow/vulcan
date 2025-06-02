@@ -180,7 +180,7 @@ func TestBuildInitAssignExpr(t *testing.T) {
 			Kind: reflect.Struct,
 		},
 	}
-	printSource(BuildInitAssignExpr(&p1, []string{"res"}, "mapper"))
+	printSource(BuildInitAssignExpr(&p1, "res", "mapper"))
 	p2 := types.Param{
 		Type: types.TypeSpec{
 			Name: "User",
@@ -190,37 +190,37 @@ func TestBuildInitAssignExpr(t *testing.T) {
 			Kind: reflect.Struct,
 		},
 	}
-	printSource(BuildInitAssignExpr(&p2, []string{"res"}, "model"))
+	printSource(BuildInitAssignExpr(&p2, "res", "model"))
 	p3 := types.Param{
 		Type: types.TypeSpec{
 			Kind: reflect.Int,
 		},
 	}
-	printSource(BuildInitAssignExpr(&p3, []string{"res"}, ""))
+	printSource(BuildInitAssignExpr(&p3, "res", ""))
 	p4 := types.Param{
 		Type: types.TypeSpec{
 			Kind: reflect.String,
 		},
 	}
-	printSource(BuildInitAssignExpr(&p4, []string{"res"}, ""))
+	printSource(BuildInitAssignExpr(&p4, "res", ""))
 	p5 := types.Param{
 		Type: types.TypeSpec{
 			Kind: reflect.Int32,
 		},
 	}
-	printSource(BuildInitAssignExpr(&p5, []string{"res"}, ""))
+	printSource(BuildInitAssignExpr(&p5, "res", ""))
 	p6 := types.Param{
 		Type: types.TypeSpec{
 			Kind: reflect.Float32,
 		},
 	}
-	printSource(BuildInitAssignExpr(&p6, []string{"res"}, ""))
+	printSource(BuildInitAssignExpr(&p6, "res", ""))
 	p7 := types.Param{
 		Type: types.TypeSpec{
 			Kind: reflect.Bool,
 		},
 	}
-	printSource(BuildInitAssignExpr(&p7, []string{"res"}, ""))
+	printSource(BuildInitAssignExpr(&p7, "res", ""))
 
 	p8 := types.Param{
 		Type: types.TypeSpec{
@@ -234,7 +234,7 @@ func TestBuildInitAssignExpr(t *testing.T) {
 			},
 		},
 	}
-	printSource(BuildInitAssignExpr(&p8, []string{"res"}, "mapper"))
+	printSource(BuildInitAssignExpr(&p8, "res", "mapper"))
 
 	p9 := types.Param{
 		Type: types.TypeSpec{
@@ -248,7 +248,7 @@ func TestBuildInitAssignExpr(t *testing.T) {
 			},
 		},
 	}
-	printSource(BuildInitAssignExpr(&p9, []string{"res"}, "mapper"))
+	printSource(BuildInitAssignExpr(&p9, "res", "mapper"))
 
 	p10 := types.Param{
 		Type: types.TypeSpec{
@@ -265,7 +265,7 @@ func TestBuildInitAssignExpr(t *testing.T) {
 			},
 		},
 	}
-	printSource(BuildInitAssignExpr(&p10, []string{"res"}, "mapper"))
+	printSource(BuildInitAssignExpr(&p10, "res", "mapper"))
 
 	p11 := types.Param{
 		Type: types.TypeSpec{
@@ -275,7 +275,7 @@ func TestBuildInitAssignExpr(t *testing.T) {
 			},
 		},
 	}
-	printSource(BuildInitAssignExpr(&p11, []string{"res"}, "mapper"))
+	printSource(BuildInitAssignExpr(&p11, "res", "mapper"))
 
 	p12 := types.Param{
 		Type: types.TypeSpec{
@@ -285,5 +285,31 @@ func TestBuildInitAssignExpr(t *testing.T) {
 			},
 		},
 	}
-	printSource(BuildInitAssignExpr(&p12, []string{"res"}, "mapper"))
+	printSource(BuildInitAssignExpr(&p12, "res", "mapper"))
+}
+
+func TestGenCompositeLit(t *testing.T) {
+	compositeLit := &ast.CompositeLit{
+		Type: &ast.SelectorExpr{
+			X:   ast.NewIdent("model"),
+			Sel: ast.NewIdent("User"),
+		},
+		Lbrace: 65535,
+		Elts: []ast.Expr{
+			&ast.KeyValueExpr{
+				Key:   ast.NewIdent("Name"),
+				Value: ast.NewIdent("name"),
+				Colon: 65536,
+			},
+			&ast.KeyValueExpr{
+				Key:   ast.NewIdent("Password"),
+				Value: ast.NewIdent("password"),
+				Colon: 65537,
+			},
+		},
+		Rbrace:     65538,
+		Incomplete: false,
+	}
+
+	format.Node(os.Stdout, token.NewFileSet(), compositeLit)
 }

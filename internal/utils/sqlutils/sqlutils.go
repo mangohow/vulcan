@@ -25,8 +25,19 @@ func ParseSQLStmt(sql string) *SqlParseResult {
 	// 替换占位符
 	preparedSQL := sqlParamRegex.ReplaceAllString(sql, "?")
 
-	// 去除\n\r
-	preparedSQL = strings.ReplaceAll(preparedSQL, "\n\r", " ")
+	// 去除\n
+	for {
+		idx := strings.Index(preparedSQL, "\n")
+		if idx == -1 {
+			break
+		}
+
+		prev := preparedSQL[:idx]
+		idx++
+		for ; idx < len(preparedSQL) && preparedSQL[idx] == ' '; idx++ {
+		}
+		preparedSQL = strings.TrimRight(prev, " ") + " " + preparedSQL[idx:]
+	}
 
 	return &SqlParseResult{
 		SQL:        preparedSQL,
