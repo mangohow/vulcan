@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"github.com/mangohow/mangokit/tools/collection"
 	"github.com/mangohow/mangokit/tools/stream"
+	"github.com/mangohow/mangokit/tools/strutil"
 	"github.com/mangohow/vulcan"
 	"github.com/mangohow/vulcan/internal/ast/astutils"
 	"github.com/mangohow/vulcan/internal/ast/parser/types"
+	"github.com/mangohow/vulcan/internal/log"
 	"github.com/mangohow/vulcan/internal/utils"
 	"github.com/mangohow/vulcan/internal/utils/sqlutils"
 	"github.com/mangohow/vulcan/internal/version"
@@ -16,7 +18,9 @@ import (
 	"go/token"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
+	"time"
 )
 
 var (
@@ -504,7 +508,41 @@ func (g *FileGenerator) generateCode(filename string) error {
 		importGenDecl.Specs = append(importGenDecl.Specs, importSpec)
 	}
 	astFile.Decls = append(astFile.Decls, importGenDecl)
+
+	tempName := strutil.RandString(8) + strconv.Itoa(int(time.Now().UnixNano()))
 	astFile.Decls = append(astFile.Decls, stream.Map(g.srcFile.Declarations, func(t types.Declaration) ast.Decl {
+		// 处理结构体单字段生成不会换行的问题
+		genDecl, ok := t.AstDecl.(*ast.GenDecl)
+		if !ok {
+			return t.AstDecl
+		}
+
+		stream.ForEach(genDecl.Specs, func(spec ast.Spec) bool {
+			typeSpec, ok := spec.(*ast.TypeSpec)
+			if !ok {
+				return true
+			}
+			if typeSpec.Type == nil {
+				return true
+			}
+
+			st, ok := typeSpec.Type.(*ast.StructType)
+			if !ok {
+				return true
+			}
+
+			if st.Fields == nil || len(st.Fields.List) != 1 {
+				return true
+			}
+
+			st.Fields.List = append(st.Fields.List, &ast.Field{
+				Names: []*ast.Ident{ast.NewIdent("_")},
+				Type:  ast.NewIdent(tempName),
+			})
+
+			return true
+		})
+
 		return t.AstDecl
 	})...)
 
@@ -518,8 +556,14 @@ func (g *FileGenerator) generateCode(filename string) error {
 	// 替换空行
 	source = trimEmptyLineSign(source)
 
-	// 在所有函数声明前面加一个空行
-	source = strings.ReplaceAll(source, "\nfunc", "\n\nfunc")
+	// 在所有类型声明和函数声明前面加一个空行
+	r := strings.NewReplacer([]string{
+		"\nfunc", "\n\nfunc",
+		"type ", "\ntype ",
+	}...)
+	source = r.Replace(source)
+	// 控制声明块之间只有一个空行
+	source = strings.ReplaceAll(source, "\n\n\n", "\n\n")
 
 	// 所有的结构体初始化, key:val添加换行
 	const startKey = "vulcan.ExecOption{SqlStmt"
@@ -541,6 +585,17 @@ func (g *FileGenerator) generateCode(filename string) error {
 		source = source[:idx1] + fragment + source[idx1+idx2+len(endKey):]
 	}
 
+	// 处理占位结构体字段
+	for {
+		idx1 := strings.Index(source, tempName)
+		if idx1 == -1 {
+			break
+		}
+		idx2 := strings.LastIndex(source[:idx1], "\n")
+
+		source = source[:idx2] + source[idx1+len(tempName):]
+	}
+
 	file, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0644)
 	if err != nil {
 		return fmt.Errorf("open file error: %v", err)
@@ -549,6 +604,8 @@ func (g *FileGenerator) generateCode(filename string) error {
 
 	fmt.Fprint(file, fileHeaderComment)
 	fmt.Fprint(file, source)
+
+	log.Infof("Generate go file %s!", filename)
 	return nil
 }
 
