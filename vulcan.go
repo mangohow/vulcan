@@ -59,7 +59,7 @@ func (e *ExecOption) Select(dest any, query string, args ...any) error {
 }
 
 func (e *ExecOption) Get(dest any, query string, args ...any) error {
-	return e.Execer.Get(dest, query, args)
+	return e.Execer.Get(dest, query, args...)
 }
 
 type Option func(*ExecOption)
