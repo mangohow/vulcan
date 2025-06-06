@@ -60,6 +60,51 @@ func NewBaseMapperImpl[T any](dbOpt *sqlx.DB) BaseMapper[T] {
 	return b
 }
 
+func (b *BaseMapperImpl[T]) Insert(entity *T, opts ...Option) (int, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b *BaseMapperImpl[T]) InsertBatch(entities []*T, opts ...Option) (int, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b *BaseMapperImpl[T]) DeleteById(id int) (int, error) {
+	res, err := b.dbOpt.Exec(b.deleteByIdSql, id)
+	if err != nil {
+		return 0, err
+	}
+
+	affected, _ := res.RowsAffected()
+	return int(affected), nil
+}
+
+func (b *BaseMapperImpl[T]) Delete() (int, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b *BaseMapperImpl[T]) DeleteBatchIds(idList []int) (int, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b *BaseMapperImpl[T]) UpdateById(entity *T, opts ...Option) (int, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b *BaseMapperImpl[T]) UpdateByBatchIds(entity []*T, opts ...Option) (int, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b *BaseMapperImpl[T]) Update() (int, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (b *BaseMapperImpl[T]) SelectById(id int) (*T, error) {
 	res := b.newFunc()
 	err := b.dbOpt.Get(res, b.selectByIdSql, id)
@@ -70,7 +115,22 @@ func (b *BaseMapperImpl[T]) SelectById(id int) (*T, error) {
 	return res, nil
 }
 
-func (b *BaseMapperImpl[T]) SelectPage(p types.Page[T], wp wrapper.QueryWrapper[T]) (types.Page[T], error) {
+func (b *BaseMapperImpl[T]) SelectBatchIds(idList []int) ([]*T, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b *BaseMapperImpl[T]) SelectOne() (*T, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b *BaseMapperImpl[T]) SelectList() ([]*T, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b *BaseMapperImpl[T]) SelectPage(p types.Page[T], w wrapper.QueryWrapper[T]) (types.Page[T], error) {
 	if p == nil {
 		return nil, errors.New("input parameter page is nil")
 	}
@@ -105,41 +165,11 @@ func (b *BaseMapperImpl[T]) SelectPage(p types.Page[T], wp wrapper.QueryWrapper[
 	return nil, nil // TODO
 }
 
-func (b *BaseMapperImpl[T]) DeleteById(id int) (int, error) {
-	res, err := b.dbOpt.Exec(b.deleteByIdSql, id)
-	if err != nil {
-		return 0, err
-	}
-
-	affected, _ := res.RowsAffected()
-	return int(affected), nil
-}
-
-func (b *BaseMapperImpl[T]) Insert(entity T, opts ...Option) (int, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (b *BaseMapperImpl[T]) Delete() (int, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (b *BaseMapperImpl[T]) SelectOne() (*T, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (b *BaseMapperImpl[T]) SelectList() ([]*T, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
 // 类型校验, 必须是结构体或结构体指针, 不允许多级指针或其他类型
 func checkType[T any]() {
 	var val T
 	rt := reflect.TypeOf(val)
-	if rt.Kind() != reflect.Ptr {
+	if rt.Kind() != reflect.Struct {
 		panic("type T must be a struct")
 	}
 }
