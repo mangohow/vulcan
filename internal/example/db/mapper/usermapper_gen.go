@@ -7,7 +7,6 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/mangohow/vulcan"
 	"github.com/mangohow/vulcan/internal/example/model"
-	"strings"
 	"time"
 )
 
@@ -161,27 +160,17 @@ func (m *UserMapper) UpdatePassword(user *model.User, opts ...vulcan.Option) (in
 }
 
 func (m *UserMapper) UpdateById(user *model.User, opts ...vulcan.Option) (int, error) {
-	builder := strings.Builder{}
-	args := make([]interface{}, 0, 4)
-	builder.Grow(128)
-	builder.WriteString("UPDATE t_user SET ")
-	if user.Password != "" {
-		args = append(args, user.Password)
-		builder.WriteString("password = ? ")
-	}
-	if user.Email != "" {
-		args = append(args, user.Email)
-		builder.WriteString("email = ? ")
-	}
-	if user.Address != "" {
-		args = append(args, user.Address)
-		builder.WriteString("address = ? ")
-	}
-	builder.WriteString("WHERE id = ? ")
-	args = append(args, user.Id)
+	builder := vulcan.NewSqlBuild(128, 0, 3)
+	builder.AppendStmt("UPDATE t_user SET ")
+	builder.AppendSetStmtConditional(user.Password != "", user.Password, "password = ?").
+		AppendSetStmtConditional(user.Email != "", user.Email, "email = ?").
+		AppendSetStmtConditional(user.Address != "", user.Address, "address = ?").
+		EndSetStmt()
+	builder.AppendStmt("WHERE id = ? ", user.Id)
+
 	option := &vulcan.ExecOption{
 		SqlStmt: builder.String(),
-		Args:    args,
+		Args:    builder.Args(),
 		Execer:  m.db,
 	}
 	vulcan.InvokePreHandler(option, opts...)
@@ -200,22 +189,15 @@ func (m *UserMapper) UpdateById(user *model.User, opts ...vulcan.Option) (int, e
 }
 
 func (m *UserMapper) Find(user *model.User) (*model.User, error) {
-	builder := strings.Builder{}
-	args := make([]interface{}, 0, 2)
-	builder.Grow(128)
-	builder.WriteString("SELECT * FROM t_user ")
-	if user.Username != "" {
-		builder.WriteString("WHERE username = ? ")
-		args = append(args, user.Username)
-	}
-	if user.Password != "" {
-		builder.WriteString("AND password = ? ")
-		args = append(args, user.Password)
-	}
+	builder := vulcan.NewSqlBuild(128, 2, 0)
+	builder.AppendStmt("SELECT * FROM t_user")
+	builder.AppendWhereStmtConditional(user.Username != "", user.Username, "AND username = ?").
+		AppendWhereStmtConditional(user.Password != "", user.Password, "AND password = ?").
+		EndWhereStmt()
 
 	option := &vulcan.ExecOption{
 		SqlStmt: builder.String(),
-		Args:    args,
+		Args:    builder.Args(),
 		Execer:  m.db,
 	}
 	vulcan.InvokePreHandler(option)
@@ -230,21 +212,15 @@ func (m *UserMapper) Find(user *model.User) (*model.User, error) {
 }
 
 func (m *UserMapper) Find2(user *model.User) (model.User, error) {
-	builder := strings.Builder{}
-	args := make([]interface{}, 0, 2)
-	builder.Grow(128)
-	builder.WriteString("SELECT * FROM t_user ")
-	if user.Username != "" {
-		builder.WriteString("WHERE username = ? ")
-		args = append(args, user.Username)
-	}
-	if user.Password != "" {
-		builder.WriteString("AND password = ? ")
-		args = append(args, user.Password)
-	}
+	builder := vulcan.NewSqlBuild(128, 2, 0)
+	builder.AppendStmt("SELECT * FROM t_user")
+	builder.AppendWhereStmtConditional(user.Username != "", user.Username, "AND username = ?").
+		AppendWhereStmtConditional(user.Password != "", user.Password, "AND password = ?").
+		EndWhereStmt()
+
 	option := &vulcan.ExecOption{
 		SqlStmt: builder.String(),
-		Args:    args,
+		Args:    builder.Args(),
 		Execer:  m.db,
 	}
 	vulcan.InvokePreHandler(option)
@@ -259,21 +235,15 @@ func (m *UserMapper) Find2(user *model.User) (model.User, error) {
 }
 
 func (m *UserMapper) BatchAdd(users []*model.User, opts ...vulcan.Option) (int, error) {
-	builder := strings.Builder{}
-	builder.Grow(69 + len(users)*18)
-	args := make([]interface{}, 0, 6*len(users))
-	builder.WriteString("INSERT INTO t_user (id, username, password, create_at, email, address) VALUES ")
-	for i, user := range users {
-		args = append(args, user.Id, user.Username, user.Password, user.CreatedAt, user.Email, user.Address)
-		if i != 0 {
-			builder.WriteString(", ")
-		}
-		builder.WriteString("(?, ?, ?, ?, ?, ?)")
-	}
-	builder.WriteString(" ")
+	builder := vulcan.NewSqlBuilderGenerics[*model.User](128, 0, 0)
+	builder.AppendStmt("INSERT INTO t_user (id, username, password, create_at, email, address) VALUES ")
+	builder.AppendLoopStmt(users, " ", "", "", func(user *model.User) []any {
+		return []any{user.Id, user.Username, user.Password, user.CreatedAt, user.Email, user.Address}
+	}, "(?, ?, ?, ?, ?, ?)")
+
 	option := &vulcan.ExecOption{
 		SqlStmt: builder.String(),
-		Args:    args,
+		Args:    builder.Args(),
 		Execer:  m.db,
 	}
 	vulcan.InvokePreHandler(option, opts...)
@@ -292,29 +262,17 @@ func (m *UserMapper) BatchAdd(users []*model.User, opts ...vulcan.Option) (int, 
 }
 
 func (m *UserMapper) UpdateByIdOrUsername(user *model.User, opts ...vulcan.Option) error {
-	builder := strings.Builder{}
-	builder.Grow(64)
-	args := make([]interface{}, 0, 3)
-	builder.WriteString("UPDATE t_user SET")
-	if user.Password != "" {
-		builder.WriteString("password = ? ")
-		args = append(args, user.Password)
-	}
-	if user.Email != "" {
-		builder.WriteString("email = ? ")
-		args = append(args, user.Email)
-	}
-	builder.WriteString("WHERE ")
-	if user.Id > 0 {
-		builder.WriteString("id = ? ")
-		args = append(args, user.Id)
-	} else if user.Username != "" {
-		builder.WriteString("username = ? ")
-		args = append(args, user.Username)
-	}
+	builder := vulcan.NewSqlBuild(128, 1, 2)
+	builder.AppendStmt("UPDATE t_user SET")
+	builder.AppendSetStmtConditional(user.Password != "", user.Password, "password = ?").
+		AppendSetStmtConditional(user.Email != "", user.Email, "email = ?")
+	builder.AppendWhereStmtChoosed(vulcan.MakeSlice(user.Id > 0, user.Username != ""),
+		vulcan.MakeSlice[any](user.Id, user.Username),
+		vulcan.MakeSlice("id = ?", "username = ?"))
+
 	option := &vulcan.ExecOption{
 		SqlStmt: builder.String(),
-		Args:    args,
+		Args:    builder.Args(),
 		Execer:  m.db,
 	}
 	vulcan.InvokePreHandler(option, opts...)
@@ -328,27 +286,15 @@ func (m *UserMapper) UpdateByIdOrUsername(user *model.User, opts ...vulcan.Optio
 }
 
 func (u *UserMapper) SelectPage(page vulcan.Page, cond *model.QueryCond) ([]*model.User, error) {
-	builder := strings.Builder{}
-	args := make([]interface{}, 0, 5)
-	conds := make([]string, 0, 5)
-	builder.WriteString("SELECT * FROM t_user ")
-	if cond.Username != "" {
-		args = append(args, cond.Username)
-		conds = append(conds, "AND username = ? ")
-	}
-	if cond.Address != "" {
-		args = append(args, cond.Address)
-		conds = append(conds, "AND address = ? ")
-	}
-	if len(conds) != 0 {
-		builder.WriteString("WHERE 1 = 1 ")
-	}
-	for _, c := range conds {
-		builder.WriteString(c)
-	}
+	builder := vulcan.NewSqlBuild(128, 2, 0)
+	builder.AppendStmt("SELECT * FROM t_user ")
+	builder.AppendWhereStmtConditional(cond.Username != "", cond.Username, "AND username = ?").
+		AppendWhereStmtConditional(cond.Address != "", cond.Address, "AND address = ?").
+		EndWhereStmt()
+
 	option := &vulcan.ExecOption{
 		SqlStmt:  builder.String(),
-		Args:     args,
+		Args:     builder.Args(),
 		FirstArg: page,
 	}
 	vulcan.InvokePreHandler(option)

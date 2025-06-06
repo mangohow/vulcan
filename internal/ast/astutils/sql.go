@@ -35,7 +35,12 @@ func (f *FuncArg) basicLit(token gotoken.Token) *FuncArg {
 
 func (f *FuncArg) buildExpr() ast.Expr {
 	if f.BasicLitFlag != gotoken.ILLEGAL {
-		return BuildBasicLit(f.BasicLitFlag, fmt.Sprintf("%q", f.Name))
+
+		if f.BasicLitFlag == gotoken.INT {
+			return BuildBasicLit(gotoken.INT, f.Name)
+		} else {
+			return BuildBasicLit(f.BasicLitFlag, fmt.Sprintf("%q", f.Name))
+		}
 	}
 	expr := BuildIdentOrSelectorExpr(f.Name)
 
@@ -239,4 +244,72 @@ func BuildSqlForRangeStmt(k, v, target, collection, builderName, writeVal, separ
 	}
 
 	return BuildForRangeStmt(k, v, target, body)
+}
+
+// BuildChainedCallExpr 构建链式调用, 比如
+/*
+ builder.AppendSetStmtConditional(user.Password != "", user.Password, "password = ?").
+	AppendSetStmtConditional(user.Email != "", user.Email, "email = ?").
+	AppendSetStmtConditional(user.Address != "", user.Address, "address = ?")
+*/
+func BuildChainedCallExpr(pkgName, funcName string, conds []*ast.BinaryExpr, vars, sqls []string) *ast.CallExpr {
+	var x ast.Expr = ast.NewIdent(pkgName)
+	for i, cond := range conds {
+		callExpr := &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   x,
+				Sel: ast.NewIdent(funcName),
+			},
+			Args: []ast.Expr{
+				cond,
+				BuildIdentOrSelectorExpr(vars[i]),
+				BuildBasicLit(gotoken.STRING, sqls[i]),
+			},
+		}
+		x = callExpr
+	}
+
+	return x.(*ast.CallExpr)
+}
+
+func BuildSimpleCall(x ast.Expr, sel *ast.Ident) *ast.CallExpr {
+	return &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   x,
+			Sel: sel,
+		},
+	}
+}
+
+func BuildCallAssignGenerics(left []string, assign string, fn string, args []*FuncArg, generics string, genericsStar, ddd bool) *ast.AssignStmt {
+	lhs := BuildIdentOrSelectorExprList(left)
+	fnExpr := BuildIdentOrSelectorExpr(fn)
+	if generics != "" {
+		fnExpr = &ast.IndexExpr{
+			X: fnExpr,
+		}
+		if genericsStar {
+			fnExpr.(*ast.IndexExpr).Index = &ast.StarExpr{
+				X: BuildIdentOrSelectorExpr(generics),
+			}
+		} else {
+			fnExpr.(*ast.IndexExpr).Index = BuildIdentOrSelectorExpr(generics)
+		}
+	}
+
+	argExpr := make([]ast.Expr, 0, len(args))
+	for _, arg := range args {
+		argExpr = append(argExpr, arg.buildExpr())
+	}
+
+	tok := gotoken.DEFINE
+	if assign == "=" {
+		tok = gotoken.ASSIGN
+	}
+
+	return &ast.AssignStmt{
+		Lhs: lhs,
+		Tok: tok,
+		Rhs: []ast.Expr{BuildCallExpr(fnExpr, argExpr, ddd)},
+	}
 }

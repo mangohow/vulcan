@@ -58,7 +58,7 @@ func (m *UserMapper) Find(user *model.User) (*model.User, error) {
 func (m *UserMapper) BatchAdd(users []*model.User) error {
 	Insert(SQL().
 		Stmt("INSERT INTO t_user (id, username, password, create_at, email, address) VALUES ").
-		Foreach("users", "user", ",", "", "",
+		Foreach("users", "user", " ", "", "",
 			"(#{user.Id}, #{user.Username}, #{user.Password}, #{user.CreateAt}, #{user.Email}, #{user.Address})").Build())
 	panic("")
 }

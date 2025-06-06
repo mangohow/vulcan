@@ -76,7 +76,7 @@ func (s SqlType) String() string {
 	case SqlTypeSelect:
 		return "SELECT"
 	default:
-		return fmt.Sprintf("unsupported sql")
+		return fmt.Sprintf("unsupported Sql")
 	}
 }
 
@@ -94,6 +94,8 @@ func ToSqlType(s string) SqlType {
 		return SqlTypeUnsupported
 	}
 }
+
+var re = regexp.MustCompile(`#\{([^}]*)\}`)
 
 type SQL interface {
 	sqlDoNotCall()
@@ -117,30 +119,32 @@ type Cond interface {
 
 type SimpleStmt struct {
 	SQL
-	stmt string
+	Sql  string
+	Args []string
 }
 
 func NewSimpleStmt(stmt string) *SimpleStmt {
 	stmt = strings.Trim(stmt, "`\"")
-	return &SimpleStmt{stmt: stringutils.TrimTrailingRedundantSpaces(stmt)}
+	sql, args := parseSqlArgs(stmt)
+	return &SimpleStmt{Sql: sql, Args: args}
 }
 
 type WhereStmt struct {
 	SQL
-	cond Cond
+	Cond Cond
 }
 
 func NewWhereStmt(cond Cond) *WhereStmt {
-	return &WhereStmt{cond: cond}
+	return &WhereStmt{Cond: cond}
 }
 
 type SetStmt struct {
 	SQL
-	cond Cond
+	Cond Cond
 }
 
 func NewSetStmt(cond Cond) *SetStmt {
-	return &SetStmt{cond: cond}
+	return &SetStmt{Cond: cond}
 }
 
 type IfStmt struct {
@@ -153,35 +157,41 @@ type IfStmt struct {
 
 func NewIfStmt(expr *ast.BinaryExpr, sql string) *IfStmt {
 	sql = strings.Trim(sql, "`\"")
-	re := regexp.MustCompile(`#\{([^}]*)\}`)
+
 	stmt := &IfStmt{
 		expr: expr,
 	}
+	s, args := parseSqlArgs(sql)
+	stmt.sql = s
+	stmt.field = args
 
+	return stmt
+}
+
+func parseSqlArgs(sql string) (string, []string) {
+	var args []string
 	// 提取所有匹配项
 	matches := re.FindAllStringSubmatch(sql, -1)
 	for _, match := range matches {
 		if len(match) > 1 {
-			stmt.field = match
+			args = match
 		}
 	}
 
 	// 替换所有 #{...} 为 ?
 	sql = re.ReplaceAllString(sql, "?")
-	stmt.sql = stringutils.TrimTrailingRedundantSpaces(sql)
-
-	return stmt
+	return stringutils.TrimTrailingRedundantSpaces(sql), args
 }
 
 type IfChainStmt struct {
 	SQL
 	Cond
-	stmts []*IfStmt
+	Stmts []*IfStmt
 }
 
 func NewIfChainStmt(stmts []*IfStmt) *IfChainStmt {
 	return &IfChainStmt{
-		stmts: stmts,
+		Stmts: stmts,
 	}
 }
 
@@ -207,22 +217,22 @@ func NewChooseStmt(stmt []*WhenStmt, otherwise string) *ChooseStmt {
 
 type ForeachStmt struct {
 	SQL
-	collectionName string
+	CollectionName string
 	itemName       string
-	separator      string
-	open           string
-	close          string
-	sql            string
+	Separator      string
+	Open           string
+	Close          string
+	Sql            string
 }
 
 func NewForeachStmt(collectionName, itemName, separator, open, close, sql string) *ForeachStmt {
 	return &ForeachStmt{
-		collectionName: strings.Trim(collectionName, "`\""),
+		CollectionName: strings.Trim(collectionName, "`\""),
 		itemName:       strings.Trim(itemName, "`\""),
-		separator:      strings.Trim(separator, "`\""),
-		open:           strings.Trim(open, "`\""),
-		close:          strings.Trim(close, "`\""),
-		sql:            strings.Trim(sql, "`\""),
+		Separator:      strings.Trim(separator, "`\""),
+		Open:           strings.Trim(open, "`\""),
+		Close:          strings.Trim(close, "`\""),
+		Sql:            strings.Trim(sql, "`\""),
 	}
 }
 
@@ -254,17 +264,17 @@ loop:
 		case EmptySQLImpl:
 			fmt.Fprintf(writer, "[Empty SQL]\n")
 		case *SimpleStmt:
-			fmt.Fprintf(writer, "[SQL Stmt] %s\n", v.stmt)
+			fmt.Fprintf(writer, "[SQL Stmt] %s\n", v.Sql)
 		case rawSql:
 			fmt.Fprintf(writer, "[Static Raw SQL] %s\n", v)
 		case *WhereStmt:
 			fmt.Fprintf(writer, "[Where Stmt] ")
-			cond = v.cond
+			cond = v.Cond
 		case *SetStmt:
 			fmt.Fprintf(writer, "[Set Stmt]")
-			cond = v.cond
+			cond = v.Cond
 		case *ForeachStmt:
-			fmt.Fprintf(writer, "[Foreach Stmt] %s %s %s %s %s %s\n", v.collectionName, v.itemName, v.separator, v.open, v.close, v.sql)
+			fmt.Fprintf(writer, "[Foreach Stmt] %s %s %s %s %s %s\n", v.CollectionName, v.itemName, v.Separator, v.Open, v.Close, v.Sql)
 		case *ChooseStmt:
 			fmt.Fprintf(writer, "[Choose Stmt] ")
 			for _, w := range v.when {
@@ -279,7 +289,7 @@ loop:
 			fmt.Fprintf(writer, "[If Stmt] %s\n", v.sql)
 		case *IfChainStmt:
 			fmt.Fprintf(writer, "[If Stmt] ")
-			for _, i := range v.stmts {
+			for _, i := range v.Stmts {
 				fmt.Fprintf(writer, "If: %s ", i.sql)
 			}
 			fmt.Fprintf(writer, "\n")

@@ -480,8 +480,122 @@ func getReceiverDbFieldName(param *types.Param) string {
 }
 
 func (g *FileGenerator) generateDynamicSqlFuncBodyAst(decl *types.Declaration) (*ast.BlockStmt, error) {
+	blockStmt := &ast.BlockStmt{}
 
-	return nil, nil
+	var (
+		whereInitial, setInitial = g.statisticsInitialCapacity(decl.SqlFuncDecl.Sql)
+		builderAssignExpr        *ast.AssignStmt
+		genericsName             = ""
+		genericsStar             = false
+		builderVarName           = "builder" // TODO builder可能不可用
+	)
+	if stmt := g.findForeachStmt(decl.SqlFuncDecl.Sql); stmt != nil {
+		param := decl.SqlFuncDecl.InputParam[stmt.CollectionName]
+		if !param.Type.IsSlice() {
+			return nil, fmt.Errorf("param %s is not slice", stmt.CollectionName)
+		}
+
+		valueType := &param.Type
+
+		if valueType.IsPointer() {
+			genericsStar = true
+			valueType = valueType.ValueType
+		}
+		if valueType.Package == nil {
+			genericsName = valueType.Name
+		} else {
+			genericsName = valueType.Package.PackageName + "." + valueType.Name
+		}
+	}
+
+	builderAssignExpr = astutils.BuildCallAssignGenerics([]string{builderVarName}, ":=", "vulcan.NewSqlBuilderGenerics", []*astutils.FuncArg{
+		{Name: strconv.Itoa(128), BasicLitFlag: token.INT},
+		{Name: strconv.Itoa(whereInitial), BasicLitFlag: token.INT},
+		{Name: strconv.Itoa(setInitial), BasicLitFlag: token.INT},
+	}, genericsName, genericsStar, false)
+	blockStmt.List = append(blockStmt.List, builderAssignExpr)
+
+	// 生成动态sql代码Ast
+	for _, sql := range decl.SqlFuncDecl.Sql {
+		var added ast.Stmt
+		switch stmt := sql.(type) {
+		case *types.WhereStmt:
+			added = g.generateWhereStmtAst(stmt, builderVarName)
+		case *types.SetStmt:
+			added = g.generateSetStmtAst(stmt, builderVarName)
+		case *types.IfStmt:
+			added = g.generateIfStmtAst(stmt, builderVarName)
+		case *types.ForeachStmt:
+			added = g.generateForeachStmtAst(stmt, builderVarName)
+		case *types.SimpleStmt:
+			added = g.generateSimpleStmtAst(stmt, builderVarName)
+		default:
+			return nil, fmt.Errorf("unknown annotaion type: %T", sql)
+		}
+		blockStmt.List = append(blockStmt.List, added)
+	}
+
+	return blockStmt, nil
+}
+
+func (g *FileGenerator) generateWhereStmtAst(stmt *types.WhereStmt, builderVarName string) ast.Stmt {
+
+	return nil
+}
+
+func (g *FileGenerator) generateSetStmtAst(stmt *types.SetStmt, builderVarName string) ast.Stmt {
+
+	return nil
+}
+
+func (g *FileGenerator) generateIfStmtAst(stmt *types.IfStmt, builderVarName string) ast.Stmt {
+
+	return nil
+}
+
+func (g *FileGenerator) generateForeachStmtAst(stmt *types.ForeachStmt, builderVarName string) ast.Stmt {
+
+	return nil
+}
+
+func (g *FileGenerator) generateSimpleStmtAst(stmt *types.SimpleStmt, builderVarName string) ast.Stmt {
+
+	return nil
+}
+
+func (g *FileGenerator) findForeachStmt(sqls []types.SQL) *types.ForeachStmt {
+	for _, sql := range sqls {
+		if stmt, ok := sql.(*types.ForeachStmt); ok {
+			return stmt
+		}
+	}
+
+	return nil
+}
+
+func (g *FileGenerator) statisticsInitialCapacity(sqls []types.SQL) (int, int) {
+	var (
+		whereInitial, setInitial int
+	)
+
+	for _, sql := range sqls {
+		switch stmt := sql.(type) {
+		case types.WhereStmt:
+			ifChainStmt, ok := stmt.Cond.(*types.IfChainStmt)
+			if !ok {
+				break
+			}
+			whereInitial += len(ifChainStmt.Stmts)
+		case types.SetStmt:
+			ifChainStmt, ok := stmt.Cond.(*types.IfChainStmt)
+			if !ok {
+				break
+			}
+			setInitial += len(ifChainStmt.Stmts)
+		}
+	}
+
+	return whereInitial, setInitial
 }
 
 func (g *FileGenerator) getOptsName(optsName string, inputParm map[string]*types.Param) string {

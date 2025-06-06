@@ -115,7 +115,7 @@ func (b *BaseMapperImpl[T]) DeleteById(id int) (int, error) {
 	return int(affected), nil
 }
 
-func (b *BaseMapperImpl[T]) Insert(entity T) (int, error) {
+func (b *BaseMapperImpl[T]) Insert(entity T, opts ...Option) (int, error) {
 	//TODO implement me
 	panic("implement me")
 }
