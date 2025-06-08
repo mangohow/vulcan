@@ -49,7 +49,12 @@ func (m *DependencyManager) GetTypeInfo(filePath, pkg, typeName string) (*TypeIn
 		return nil, err
 	}
 
-	return m.getTypeInfo(pkg, typeName), nil
+	res := m.getTypeInfo(pkg, typeName)
+	if res == nil {
+		return nil, errors.Errorf("can't find type %s's declaration", typeName)
+	}
+
+	return res, nil
 }
 
 // getTypeInfo 用于获取指定包中指定类型的名字的类型定义。
