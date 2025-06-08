@@ -1,9 +1,9 @@
 package parser
 
 import (
-	"fmt"
 	"github.com/mangohow/mangokit/tools/stream"
 	"github.com/mangohow/vulcan/internal/ast/parser/types"
+	"github.com/mangohow/vulcan/internal/errors"
 	"github.com/mangohow/vulcan/internal/utils"
 	"go/ast"
 	"go/token"
@@ -93,7 +93,7 @@ func (m *DependencyManager) loadDependency(filePath, pkgName, structName string)
 	// 寻找模块根目录
 	p, err := utils.FindGoModuleRoot(filePath)
 	if err != nil {
-		return fmt.Errorf("find go.mod error, %v", err)
+		return errors.Wrapf(err, "can't find go.mod")
 	}
 
 	// 配置包加载参数
@@ -145,7 +145,7 @@ func (m *DependencyManager) loadDependency(filePath, pkgName, structName string)
 							if importSpec.Name != nil {
 								res.Name = importSpec.Name.Name
 							}
-							res.AbsPackagePath = strings.Trim(`"`, importSpec.Path.Value)
+							res.AbsPackagePath = strings.Trim(importSpec.Path.Value, `"`)
 							return res
 						}),
 					}

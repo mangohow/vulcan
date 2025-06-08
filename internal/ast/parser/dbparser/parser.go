@@ -2,13 +2,13 @@ package dbparser
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"github.com/mangohow/mangokit/tools/collection"
 	"github.com/mangohow/mangokit/tools/stream"
 	"github.com/mangohow/vulcan/internal/ast/astutils"
 	"github.com/mangohow/vulcan/internal/ast/parser"
 	"github.com/mangohow/vulcan/internal/ast/parser/types"
+	"github.com/mangohow/vulcan/internal/errors"
 	"github.com/mangohow/vulcan/internal/utils"
 	"go/ast"
 	astparser "go/parser"
@@ -54,20 +54,19 @@ func NewFileParser(fst *token.FileSet, dm *parser.DependencyManager) *FileParser
 func (p *FileParser) Parse(filename string) (*types.File, error) {
 	source, err := os.ReadFile(filename)
 	if err != nil {
-		return nil, fmt.Errorf("error reading %s: %w", filename, err)
+		return nil, errors.Errorf("reading file failed, reason: %v", err)
 	}
 	index := bytes.Index(source, []byte("package"))
 	if index == -1 {
-		return nil, fmt.Errorf("source file invalid, no package in %s", filename)
+		return nil, errors.Errorf("source file is invalid, no package name declared")
 	}
 	f, err := astparser.ParseFile(p.fst, "", source[index:], astparser.ParseComments)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing %s: %w", filename, err)
+		return nil, errors.Errorf("parse file failed, reason: %s", err)
 	}
 
 	// 处理导入的包
 	packageInfo := p.parseImports(f, filename)
-	//log.Infof("parsed package info: %s", packageInfo.String())
 	currentPkg, err := utils.GetCurrentPackagePath(filename)
 	if err != nil {
 		return nil, err
@@ -81,7 +80,7 @@ func (p *FileParser) Parse(filename string) (*types.File, error) {
 	// 对包进行过滤, 如果没有包含注解相关的包, 则不生成代码
 	for _, pkg := range p.filterPackages {
 		if _, ok := packageInfo.ImportsMap[pkg]; !ok {
-			return nil, fmt.Errorf("package %s not imported in %s", pkg, filename)
+			return nil, errors.Errorf("package %s is not imported", pkg)
 		}
 	}
 
@@ -91,7 +90,7 @@ func (p *FileParser) Parse(filename string) (*types.File, error) {
 	}
 	// 处理类型、函数声明
 	if err := p.parseDeclares(f, fileInfo); err != nil {
-		return nil, fmt.Errorf("parse declares eror, %v", err)
+		return nil, errors.Wrapf(err, "parse declares failed")
 	}
 
 	for i := 0; i < len(fileInfo.Declarations); i++ {
@@ -142,7 +141,7 @@ func (p *FileParser) checkNecessaryPackageImport(imports []types.ImportInfo) err
 			return info.AbsPackagePath == name
 		})
 		if !exist {
-			return fmt.Errorf("package %s is not imported", name)
+			return errors.Errorf("package %s is not imported", name)
 		}
 	}
 
@@ -173,7 +172,7 @@ func (p *FileParser) parseDeclares(af *ast.File, file *types.File) error {
 			// 在函数中寻找注解并解析
 			declare, err := p.parseFuncDeclare(d, file.PkgInfo)
 			if err != nil {
-				return err
+				return errors.Wrapf(err, "in func %s", d.Name.Name)
 			}
 
 			if declare != nil {
@@ -217,7 +216,7 @@ func (p *FileParser) parseFuncDeclare(fd *ast.FuncDecl, pkgInfo types.PackageInf
 	// 1. 先处理接收器
 	// 如果没有接收器, 则返回错误
 	if fd.Recv == nil || len(fd.Recv.List) == 0 {
-		return nil, errors.New("function must have a receiver")
+		return nil, errors.Errorf("func must have a receiver")
 	}
 
 	// 判断接收器是否为结构体, 并且包含sqlx.DB对象
@@ -268,7 +267,7 @@ loop:
 	}
 
 	if len(receiver.Names) == 0 || receiver.Names[0].Name == "_" {
-		return fmt.Errorf("receiver must have a name")
+		return errors.Errorf("receiver must have a name")
 	}
 
 	receiverType.Name = name
@@ -277,16 +276,16 @@ loop:
 		return spec.Name.Name == name
 	})
 	if !ok {
-		return fmt.Errorf("type %s not found", name)
+		return errors.Errorf("type %s not found", name)
 	}
 
 	st, ok := ts.Type.(*ast.StructType)
 	if !ok {
-		return fmt.Errorf("receiver must be struct type")
+		return errors.Errorf("receiver must be struct type")
 	}
 
 	if st.Fields == nil {
-		return fmt.Errorf("type %s must have field *sqlx.DB", name)
+		return errors.Errorf("type %s must have a field which type is *sqlx.DB", name)
 	}
 
 	for _, field := range st.Fields.List {
@@ -300,7 +299,7 @@ loop:
 		}
 		if ident, ok := se.X.(*ast.Ident); ok && ident.Name == dbOperatorRefName && se.Sel.Name == dbOperatorTypeName {
 			if len(field.Names) == 0 || field.Names[0].Name == "_" {
-				return fmt.Errorf("field sqlx.DB must have a name")
+				return errors.Errorf("the *sqlx.DB field of type %s must have a name", name)
 			}
 
 			receiverType.Fields = append(receiverType.Fields, &types.Param{
@@ -322,7 +321,7 @@ loop:
 		}
 	}
 
-	return fmt.Errorf("can't find any field type is sqlx.DB")
+	return errors.Errorf("type %s must have a field which type is *sqlx.DB", name)
 }
 
 // 解析入参数据类型
@@ -381,14 +380,14 @@ loop:
 		case *ast.SelectorExpr:
 			i, ok := et.X.(*ast.Ident)
 			if !ok {
-				return fmt.Errorf("unsupported input parameter type: %s", typeParam.Name)
+				return errors.Errorf("unsupported input parameter type: %s", typeParam.Name)
 			}
 			typeName = et.Sel.Name
 			typePkgName = i.Name
 			break loop
 		case *ast.StarExpr:
 			if isPointer {
-				return fmt.Errorf("unsupported multi level pointer")
+				return errors.Errorf("unsupported multi level pointer, type: %s", typeParam.Name)
 			}
 			typeSpec.Kind = reflect.Pointer
 			typeSpec.ValueType = &types.TypeSpec{}
@@ -397,14 +396,14 @@ loop:
 			expr = et.X
 		case *ast.ArrayType:
 			if isPointer {
-				return fmt.Errorf("unsupported pointer slice type")
+				return errors.Errorf("unsupported pointer slice type")
 			}
 			typeSpec.Kind = reflect.Slice
 			typeSpec.ValueType = &types.TypeSpec{}
 			typeSpec = typeSpec.ValueType
 			expr = et.Elt
 		default:
-			return fmt.Errorf("unsupported input parameter type: %s", typeParam.Name)
+			return errors.Errorf("unsupported input parameter type: %s", typeParam.Name)
 		}
 	}
 
@@ -415,7 +414,7 @@ loop:
 			typeSpec.Kind = rn
 		} else {
 			// 本包的结构体, 不允许
-			return fmt.Errorf("can't use types %s in %s", typeName, pkgInfo.PackagePath)
+			return errors.Errorf("can't use types %s in %s", typeName, pkgInfo.PackagePath)
 		}
 	} else {
 		// 其他包的结构体, 进行解析
@@ -423,12 +422,12 @@ loop:
 			return utils.GetPackageName(info.AbsPackagePath) == typePkgName
 		})
 		if !ok {
-			return fmt.Errorf("can't find %s.%s's type declartion", typePkgName, typeName)
+			return errors.Errorf("can't find %s.%s's type declartion", typePkgName, typeName)
 		}
 
 		typeInfo, err = p.typeParser.GetTypeInfo(pkgInfo.FilePath, found.AbsPackagePath, typeName)
 		if err != nil {
-			return fmt.Errorf("can't find type %s.%s's declartion, %w", typePkgName, typeName, err)
+			return errors.Errorf("can't find type %s.%s's declartion, %w", typePkgName, typeName, err)
 		}
 
 		*typeSpec = *typeInfo.Type
@@ -448,15 +447,13 @@ func (p *FileParser) parseOutputParameter(params []*ast.Field, fnDecl *types.Fun
 	// 增删改: 第一个参数为Number类型(int, int64, ..., uint, uint64...), 或只有一个error参数
 	// 第二个为error类型
 	if len(params) < 1 || len(params) > 2 {
-		return fmt.Errorf("function must return 1 or 2 results, and the last must be error type")
-	}
-	n := 0
-	for _, field := range params {
-		n += len(field.Names)
+		return errors.Errorf("function must return 1 or 2 results, and the last must be error type")
 	}
 
-	if n > 2 {
-		return fmt.Errorf("function must return 1 or 2 results, and the last must be error type")
+	for _, p := range params {
+		if len(p.Names) != 0 {
+			return errors.Errorf("output parameter must not have default name")
+		}
 	}
 
 	errField := params[0]
@@ -489,7 +486,7 @@ func (p *FileParser) parseOutputParameter(params []*ast.Field, fnDecl *types.Fun
 	switch paramType.Type.Kind {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 	default:
-		return fmt.Errorf("invalid output parameter %s", paramType.Type.Kind)
+		return errors.Errorf("invalid output parameter %s", paramType.Type.Kind)
 	}
 
 	return nil
@@ -498,7 +495,7 @@ func (p *FileParser) parseOutputParameter(params []*ast.Field, fnDecl *types.Fun
 func (p *FileParser) checkErrOutputParameter(field *ast.Field) error {
 	ident, ok := field.Type.(*ast.Ident)
 	if !ok || ident.Name != "error" {
-		return fmt.Errorf("function must return 1 or 2 results, and the last must be error type")
+		return errors.Errorf("function must return 1 or 2 results, and the last must be error type")
 	}
 
 	return nil
@@ -508,19 +505,19 @@ func (p *FileParser) parseFuncBody(body *ast.BlockStmt, fnDecl *types.FuncDecl, 
 	name := pkgInfo.ImportsMap[types.AnnotationPackageName]
 	sqlExpr, anno := astutils.FindCallsInBlockStmt(types.SQLAnnotationFuncs, name, body)
 	if sqlExpr == nil {
-		return errors.New("SQL annotation not found")
+		return errors.Errorf("SQL annotation not found")
 	}
 	fnDecl.Annotation = anno
 
 	if len(sqlExpr.Args) != 1 {
-		return errors.New("SQL annotation call invalid, has more than 1 parameters")
+		return errors.Errorf("SQL annotation call is invalid, has more than 1 parameters")
 	}
 
 	// 静态sql
 	arg := sqlExpr.Args[0]
 	if sbl, ok := arg.(*ast.BasicLit); ok {
 		if sbl.Kind != token.STRING {
-			return errors.New("sql invalid")
+			return errors.Errorf("sql is invalid")
 		}
 		fnDecl.Sql = append(fnDecl.Sql, types.NewRawSQL(strings.Trim(sbl.Value, "`\"")))
 
@@ -534,7 +531,7 @@ func (p *FileParser) parseFuncBody(body *ast.BlockStmt, fnDecl *types.FuncDecl, 
 	set := collection.NewSetFromSlice(types.SQLOperateNames)
 	for _, v := range scs {
 		if !set.Has(v.funcName) {
-			return fmt.Errorf("invalid operate func name %s", v.funcName)
+			return errors.Errorf("invalid operate func name %s", v.funcName)
 		}
 	}
 
@@ -543,7 +540,7 @@ func (p *FileParser) parseFuncBody(body *ast.BlockStmt, fnDecl *types.FuncDecl, 
 	for _, sc := range scs {
 		s, err := parseSqlOperate(sc)
 		if err != nil {
-			return fmt.Errorf("parse sql operate %s error, %v", sc.funcName, err)
+			return errors.Errorf("parse sql operate %s error, %v", sc.funcName, err)
 		}
 		sqls = append(sqls, s)
 	}

@@ -347,20 +347,18 @@ func BuildEllipsisField(varName, typeName string) *ast.Field {
 }
 
 // BuildKeyValueBasicLitExpr 构建key: value
-func BuildKeyValueBasicLitExpr(key, val string, kind gotoken.Token, line gotoken.Pos) *ast.KeyValueExpr {
+func BuildKeyValueBasicLitExpr(key, val string, kind gotoken.Token) *ast.KeyValueExpr {
 	return &ast.KeyValueExpr{
 		Key:   ast.NewIdent(key),
 		Value: BuildBasicLit(kind, val),
-		Colon: line,
 	}
 }
 
 // BuildKeyValueExpr 构建key: value
-func BuildKeyValueExpr(key string, val ast.Expr, line gotoken.Pos) *ast.KeyValueExpr {
+func BuildKeyValueExpr(key string, val ast.Expr) *ast.KeyValueExpr {
 	return &ast.KeyValueExpr{
 		Key:   ast.NewIdent(key),
 		Value: val,
-		Colon: line,
 	}
 }
 

@@ -39,6 +39,9 @@ func ParseSQLStmt(sql string) *SqlParseResult {
 		preparedSQL = strings.TrimRight(prev, " ") + " " + preparedSQL[idx:]
 	}
 
+	// 去除\t
+	preparedSQL = strings.ReplaceAll(preparedSQL, "\t", "")
+
 	return &SqlParseResult{
 		SQL:        preparedSQL,
 		ParamsName: params,

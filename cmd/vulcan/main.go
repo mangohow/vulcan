@@ -4,6 +4,7 @@ import (
 	"github.com/mangohow/vulcan/internal/ast/generator/dbgenerator"
 	parser2 "github.com/mangohow/vulcan/internal/ast/parser"
 	"github.com/mangohow/vulcan/internal/ast/parser/dbparser"
+	"github.com/mangohow/vulcan/internal/errors"
 	"github.com/mangohow/vulcan/internal/log"
 	"github.com/spf13/cobra"
 	"go/token"
@@ -20,7 +21,7 @@ var (
 		Run: func(cmd *cobra.Command, args []string) {
 			cmdArgs := parseCommandArgs(cmd)
 			if err := generateMapper(cmdArgs.file); err != nil {
-				log.Fatalf("parse db files: %v", err)
+				log.Fatalf("%v", err)
 			}
 		},
 	}
@@ -82,14 +83,14 @@ func generateMapper(path string) error {
 	parser := dbparser.NewFileParser(fst, dependencyManager)
 	parsedFile, err := parser.Parse(path)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "parse file %s failed", path)
 	}
 
 	idx := strings.Index(path, ".")
 	newFileName := path[:idx] + "_gen" + path[idx:]
 	generator := dbgenerator.NewFileGenerator(parsedFile)
 	if err := generator.Execute(newFileName); err != nil {
-		return err
+		return errors.Wrapf(err, "generate file %s failed", path)
 	}
 
 	return nil

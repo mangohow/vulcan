@@ -9,6 +9,7 @@ import (
 	"github.com/mangohow/vulcan"
 	"github.com/mangohow/vulcan/internal/ast/astutils"
 	"github.com/mangohow/vulcan/internal/ast/parser/types"
+	"github.com/mangohow/vulcan/internal/errors"
 	"github.com/mangohow/vulcan/internal/log"
 	"github.com/mangohow/vulcan/internal/utils"
 	"github.com/mangohow/vulcan/internal/utils/sqlutils"
@@ -29,14 +30,14 @@ var (
 
 const (
 	corePackageName = "vulcan"
+	corePackagePath = "github.com/mangohow/vulcan"
 )
 
 var (
-	execOptionName              string
-	execOptionFieldSqlStmtName  string
-	execOptionFieldArgsName     string
-	execOptionFieldExecerName   string
-	execOptionFieldFirstArgName string
+	execOptionFieldSqlStmtName   string
+	execOptionFieldArgsName      string
+	execOptionFieldExecerName    string
+	execOptionFieldExtensionName string
 
 	invokePreHandlerName  = "InvokePreHandler"
 	invokePostHandlerName = "InvokePostHandler"
@@ -77,8 +78,8 @@ func initExecOptionNames() {
 			execOptionFieldArgsName = field.Name
 		case "execer":
 			execOptionFieldExecerName = field.Name
-		case "firstArg":
-			execOptionFieldFirstArgName = field.Name
+		case "extension":
+			execOptionFieldExtensionName = field.Name
 		}
 	}
 }
@@ -104,7 +105,7 @@ func (g *FileGenerator) Execute(filename string) error {
 		}
 
 		if err := g.generateAst(&d); err != nil {
-			return err
+			return errors.Wrapf(err, "func: %s", d.SqlFuncDecl.FuncName)
 		}
 	}
 
@@ -115,7 +116,7 @@ func (g *FileGenerator) generateAst(decl *types.Declaration) error {
 	// 添加opt参数
 	fnDecl, ok := decl.AstDecl.(*ast.FuncDecl)
 	if !ok {
-		return fmt.Errorf("convert type error")
+		return errors.Errorf("convert to *ast.FuncDecl type failed")
 	}
 	optsMame := g.getOptsName("opts", decl.SqlFuncDecl.InputParam)
 	g.optsName = optsMame
@@ -125,7 +126,7 @@ func (g *FileGenerator) generateAst(decl *types.Declaration) error {
 	// 生成函数体
 	body, err := g.generateFuncBodyAst(decl)
 	if err != nil {
-		return fmt.Errorf("generate func body error, %v", err)
+		return errors.Wrapf(err, "generate func body error")
 	}
 	fnDecl.Body = body
 	decl.AstDecl = fnDecl
@@ -155,27 +156,30 @@ func (g *FileGenerator) generateStaticSqlFuncBodyAst(decl *types.Declaration, sq
 
 	// 生成option.ExecOption赋值操作
 	composite := &ast.CompositeLit{
-		Lbrace: token.Pos(1),
-		Rbrace: token.Pos(2),
-		Type:   astutils.BuildIdentOrSelectorExpr(corePackageName + "." + "ExecOption"),
+		Type: astutils.BuildIdentOrSelectorExpr(corePackageName + "." + "ExecOption"),
 		Elts: []ast.Expr{
-			astutils.BuildKeyValueBasicLitExpr(execOptionFieldSqlStmtName, fmt.Sprintf("%q", options.SQL), token.STRING, 2000),
-			astutils.BuildKeyValueExpr(execOptionFieldExecerName, astutils.BuildIdentOrSelectorExpr(options.receiverName+"."+options.receiverDbFieldName), 3000),
+			astutils.BuildKeyValueBasicLitExpr(execOptionFieldSqlStmtName, fmt.Sprintf("%q", options.SQL), token.STRING),
+			astutils.BuildKeyValueExpr(execOptionFieldExecerName, astutils.BuildIdentOrSelectorExpr(options.receiverName+"."+options.receiverDbFieldName)),
 		},
 	}
 
-	// TODO 如果第一个参数为Page则需要传入ExecOption
-
 	// 如果sql参数不为空, 则添加参数
 	if len(options.ParamsName) > 0 {
-		composite.Elts = append(composite.Elts, astutils.BuildKeyValueExpr("Args", &ast.CompositeLit{
+		composite.Elts = append(composite.Elts, astutils.BuildKeyValueExpr(execOptionFieldArgsName, &ast.CompositeLit{
 			Type: &ast.ArrayType{
 				Elt: ast.NewIdent("any"),
 			},
 			Elts: stream.Map(options.ParamsName, func(name string) ast.Expr {
 				return astutils.BuildIdentOrSelectorExpr(name)
 			}),
-		}, 4000))
+		}))
+	}
+
+	// 如果有扩展字段则需要传入ExecOption
+	for _, param := range decl.SqlFuncDecl.InputParam {
+		if param.Type.Kind == reflect.Interface && param.Type.Name == "Page" && param.Type.Package.PackagePath == corePackagePath {
+			composite.Elts = append(composite.Elts, astutils.BuildKeyValueBasicLitExpr(execOptionFieldExtensionName, param.Name, token.STRING))
+		}
 	}
 
 	optionAssign := &ast.AssignStmt{
@@ -223,7 +227,7 @@ func (g *FileGenerator) generateStaticSqlFuncBodyAst(decl *types.Declaration, sq
 	body.List = append(body.List, &ast.ExprStmt{X: postInterceptorCall})
 
 	// 构建err判断语句
-	body.List = append(body.List, g.generateReturnErrAst(decl.SqlFuncDecl.FuncReturnResultParam, options.sqlExecuteResultName[0], decl.SqlFuncDecl.Annotation))
+	body.List = append(body.List, g.generateReturnErrAst(decl.SqlFuncDecl.FuncReturnResultParam, options.sqlOperationResultName, decl.SqlFuncDecl.Annotation))
 
 	// 如果是插入语句, 可能需要给自增Id赋值
 	if decl.SqlFuncDecl.Annotation == types.SQLInsertFunc {
@@ -329,7 +333,7 @@ func (g *FileGenerator) generatePrimaryKeyAssign(options *staticSqlGenOptions, d
 		pkParam *types.Param
 	)
 	inputParams := utils.Values(decl.SqlFuncDecl.InputParam)
-	for i := 0; i < len(inputParams); {
+	for i := 0; i < len(inputParams); i++ {
 		pkParam = findPrimaryKey(inputParams[i])
 		if pkParam != nil {
 			break
@@ -434,13 +438,16 @@ func preprocessingStaticSqlGen(decl *types.Declaration, sql string) (*staticSqlG
 		options.newResultOptionArgsName = append(options.newResultOptionArgsName, corePackageName+"."+sqlTypeUpdateName, nilName, errName, sqlExecuteResultName[0])
 	case types.SQLSelectFunc:
 		sqlOperationName = dbGetOptName
+		if decl.SqlFuncDecl.FuncReturnResultParam == nil {
+			return nil, errors.Errorf("Select statement must have two returning parameters")
+		}
 		if decl.SqlFuncDecl.FuncReturnResultParam.Type.IsSlice() {
 			sqlOperationName = dbSelectOptName
 		}
 		sqlExecuteResultName = sqlExecuteResultName[1:]
 		options.newResultOptionArgsName = append(options.newResultOptionArgsName, corePackageName+"."+sqlTypeSelectName, options.sqlOperationResultName, errName, nilName)
 	default:
-		return nil, fmt.Errorf("annotation error")
+		return nil, errors.Errorf("annotation error")
 	}
 
 	options.sqlOperationName = sqlOperationName
@@ -492,7 +499,7 @@ func (g *FileGenerator) generateDynamicSqlFuncBodyAst(decl *types.Declaration) (
 	if stmt := g.findForeachStmt(decl.SqlFuncDecl.Sql); stmt != nil {
 		param := decl.SqlFuncDecl.InputParam[stmt.CollectionName]
 		if !param.Type.IsSlice() {
-			return nil, fmt.Errorf("param %s is not slice", stmt.CollectionName)
+			return nil, errors.Errorf("param %s is not slice type", stmt.CollectionName)
 		}
 
 		valueType := &param.Type
@@ -530,7 +537,7 @@ func (g *FileGenerator) generateDynamicSqlFuncBodyAst(decl *types.Declaration) (
 		case *types.SimpleStmt:
 			added = g.generateSimpleStmtAst(stmt, builderVarName)
 		default:
-			return nil, fmt.Errorf("unknown annotaion type: %T", sql)
+			return nil, errors.Errorf("unknown annotaion type: %T", sql)
 		}
 		blockStmt.List = append(blockStmt.List, added)
 	}
@@ -618,8 +625,12 @@ func (g *FileGenerator) generateCode(filename string) error {
 	importGenDecl := &ast.GenDecl{
 		Tok: token.IMPORT,
 	}
+	set := collection.NewSet[string]()
 	for _, importSpec := range g.srcFile.PkgInfo.AstImports {
-		importGenDecl.Specs = append(importGenDecl.Specs, importSpec)
+		if !set.Has(importSpec.Path.Value) {
+			importGenDecl.Specs = append(importGenDecl.Specs, importSpec)
+			set.Add(importSpec.Path.Value)
+		}
 	}
 	astFile.Decls = append(astFile.Decls, importGenDecl)
 
@@ -663,7 +674,7 @@ func (g *FileGenerator) generateCode(filename string) error {
 	buffer := bytes.NewBuffer(nil)
 	err := format.Node(buffer, token.NewFileSet(), astFile)
 	if err != nil {
-		return fmt.Errorf("generate source code error: %v", err)
+		return errors.Errorf("generate source code error: %v", err)
 	}
 
 	source := buffer.String()
@@ -673,7 +684,7 @@ func (g *FileGenerator) generateCode(filename string) error {
 	// 在所有类型声明和函数声明前面加一个空行
 	r := strings.NewReplacer([]string{
 		"\nfunc", "\n\nfunc",
-		"type ", "\ntype ",
+		"\ntype ", "\ntype ",
 	}...)
 	source = r.Replace(source)
 	// 控制声明块之间只有一个空行
@@ -681,12 +692,13 @@ func (g *FileGenerator) generateCode(filename string) error {
 
 	// 所有的结构体初始化, key:val添加换行
 	const startKey = "vulcan.ExecOption{SqlStmt"
-	const endKey = "}}\n"
+	const endKey = "}\n"
 	replacer := strings.NewReplacer([]string{
 		startKey, "vulcan.ExecOption{\n\t\tSqlStmt",
 		", Execer:", ",\n\t\tExecer:",
 		", Args:", ",\n\t\tArgs:",
-		endKey, "},\n\t}\n",
+		", Extension:", ",\n\t\tExtension:",
+		endKey, ",\n\t}\n",
 	}...)
 	for {
 		idx1 := strings.Index(source, startKey)
@@ -712,7 +724,7 @@ func (g *FileGenerator) generateCode(filename string) error {
 
 	file, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0644)
 	if err != nil {
-		return fmt.Errorf("open file error: %v", err)
+		return errors.Errorf("open file %s error: %v", filename, err)
 	}
 	defer file.Close()
 

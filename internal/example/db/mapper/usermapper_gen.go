@@ -293,9 +293,9 @@ func (u *UserMapper) SelectPage(page vulcan.Page, cond *model.QueryCond) ([]*mod
 		EndWhereStmt()
 
 	option := &vulcan.ExecOption{
-		SqlStmt:  builder.String(),
-		Args:     builder.Args(),
-		FirstArg: page,
+		SqlStmt:   builder.String(),
+		Args:      builder.Args(),
+		Extension: page,
 	}
 	vulcan.InvokePreHandler(option)
 	res := []*model.User{}

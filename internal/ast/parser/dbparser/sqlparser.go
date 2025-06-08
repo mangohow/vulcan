@@ -1,8 +1,8 @@
 package dbparser
 
 import (
-	"fmt"
 	"github.com/mangohow/vulcan/internal/ast/parser/types"
+	"github.com/mangohow/vulcan/internal/errors"
 	"go/ast"
 	"go/token"
 )
@@ -21,19 +21,19 @@ var (
 		},
 		types.SQLOperateFuncStmt: func(call *sqlCall) (types.SQL, error) {
 			if len(call.args) != 1 {
-				return nil, fmt.Errorf("operate Stmt error, must have only one parameter")
+				return nil, errors.Errorf("operate Stmt error, must have only one parameter")
 			}
 			arg := call.args[0]
 			v, ok := arg.(*ast.BasicLit)
 			if !ok || v.Kind != token.STRING {
-				return nil, fmt.Errorf("operate Stmt error, invalid parameter")
+				return nil, errors.Errorf("operate Stmt error, invalid parameter")
 			}
 
 			return types.NewSimpleStmt(v.Value), nil
 		},
 		types.SQLOperateFuncWhere: func(call *sqlCall) (types.SQL, error) {
 			if len(call.args) != 1 {
-				return nil, fmt.Errorf("operate Where error, must have only one parameter")
+				return nil, errors.Errorf("operate Where error, must have only one parameter")
 			}
 			arg := call.args[0]
 			calls := parseAllCallExprDepth(arg)
@@ -42,7 +42,7 @@ var (
 		},
 		types.SQLOperateFuncSet: func(call *sqlCall) (types.SQL, error) {
 			if len(call.args) != 1 {
-				return nil, fmt.Errorf("operate Set error, must have only one parameter")
+				return nil, errors.Errorf("operate Set error, must have only one parameter")
 			}
 
 			arg := call.args[0]
@@ -55,14 +55,14 @@ var (
 		},
 		types.SQLOperateFuncForeach: func(call *sqlCall) (types.SQL, error) {
 			if len(call.args) != 6 {
-				return nil, fmt.Errorf("operate Foreach error, invalid parameter")
+				return nil, errors.Errorf("operate Foreach error, invalid parameter")
 			}
 
 			args := make([]string, 0, 6)
 			for i, arg := range call.args {
 				v, ok := arg.(*ast.BasicLit)
 				if !ok || v.Kind != token.STRING {
-					return nil, fmt.Errorf("operate Foreach error, parameter %d invalid", i)
+					return nil, errors.Errorf("operate Foreach error, parameter %d invalid", i)
 				}
 				args = append(args, v.Value)
 			}
@@ -88,7 +88,7 @@ var (
 func parseCond(calls []*sqlCall, optName string) (types.SQL, error) {
 	// 检查 calls 列表是否为空，如果为空则返回错误。
 	if len(calls) == 0 {
-		return nil, fmt.Errorf("invalid cond in %s", optName)
+		return nil, errors.Errorf("invalid cond in %s", optName)
 	}
 
 	// 初始化条件语句和错误变量。
@@ -107,7 +107,7 @@ func parseCond(calls []*sqlCall, optName string) (types.SQL, error) {
 		stmt, err = parseCondChoose(calls)
 	default:
 		// 如果函数名不匹配已知类型，则返回错误。
-		return nil, fmt.Errorf("invalid operate func %s", calls[0].funcName)
+		return nil, errors.Errorf("invalid operate func %s", calls[0].funcName)
 	}
 
 	// 如果解析过程中发生错误，则返回错误。
@@ -126,7 +126,7 @@ func parseCond(calls []*sqlCall, optName string) (types.SQL, error) {
 	}
 
 	// 如果 optName 不匹配已知的操作名，则返回错误。
-	return nil, fmt.Errorf("invalid annotation func %s", optName)
+	return nil, errors.Errorf("invalid annotation func %s", optName)
 }
 
 // parseCondIf 解析条件语句以构建条件链。
@@ -141,18 +141,18 @@ func parseCondIf(calls []*sqlCall) (types.Cond, error) {
 	for i, call := range calls {
 		// 检查条件语句的参数数量是否正确。
 		if len(call.args) != 2 {
-			return nil, fmt.Errorf("invalid if cond, %d", i)
+			return nil, errors.Errorf("invalid if cond, %d", i)
 		}
 
 		// 验证并解析第一个参数，确保它是一个二元表达式。
 		arg1, ok := call.args[0].(*ast.BinaryExpr)
 		if !ok {
-			return nil, fmt.Errorf("invalid if cond, cond stmt is invalid, %d", i)
+			return nil, errors.Errorf("invalid if cond, cond stmt is invalid, %d", i)
 		}
 		// 验证并解析第二个参数，确保它是一个字符串类型的字面量。
 		arg2, ok := call.args[1].(*ast.BasicLit)
 		if !ok || arg2.Kind != token.STRING {
-			return nil, fmt.Errorf("invalid if cond, sql is invalid, %d", i)
+			return nil, errors.Errorf("invalid if cond, sql is invalid, %d", i)
 		}
 		// 使用解析的参数构建一个IfStmt对象，并添加到stmts切片中。
 		ifStmt := types.NewIfStmt(arg1, arg2.Value)
@@ -183,19 +183,19 @@ func parseCondChoose(calls []*sqlCall) (types.Cond, error) {
 		case types.SQLOperateFuncWhen:
 			// 检查WHEN语句的参数数量是否正确。
 			if len(call.args) != 2 {
-				return nil, fmt.Errorf("invalid choose cond, when stmt is invalid, %d", i)
+				return nil, errors.Errorf("invalid choose cond, when stmt is invalid, %d", i)
 			}
 
 			// 解析并验证第一个参数（条件表达式）。
 			arg1, ok := call.args[0].(*ast.BinaryExpr)
 			if !ok {
-				return nil, fmt.Errorf("invalid choose cond, cond stmt is invalid, %d", i)
+				return nil, errors.Errorf("invalid choose cond, cond stmt is invalid, %d", i)
 			}
 
 			// 解析并验证第二个参数（SQL语句）。
 			arg2, ok := call.args[1].(*ast.BasicLit)
 			if !ok || arg2.Kind != token.STRING {
-				return nil, fmt.Errorf("invalid choose cond, sql is invalid, %d", i)
+				return nil, errors.Errorf("invalid choose cond, sql is invalid, %d", i)
 			}
 
 			// 创建并添加WHEN语句到切片中。
@@ -205,13 +205,13 @@ func parseCondChoose(calls []*sqlCall) (types.Cond, error) {
 		case types.SQLOperateFuncOtherwise:
 			// 检查OTHERWISE语句的参数数量是否正确。
 			if len(call.args) != 1 {
-				return nil, fmt.Errorf("invalid choose cond, otherwise stmt is invalid, %d", i)
+				return nil, errors.Errorf("invalid choose cond, otherwise stmt is invalid, %d", i)
 			}
 
 			// 解析并验证OTHERWISE语句的参数（默认SQL语句）。
 			arg, ok := call.args[0].(*ast.BasicLit)
 			if !ok || arg.Kind != token.STRING || arg.Value == "" {
-				return nil, fmt.Errorf("invalid choose cond, otherwise stmt is invalid, %d", i)
+				return nil, errors.Errorf("invalid choose cond, otherwise stmt is invalid, %d", i)
 			}
 
 			// 设置OTHERWISE语句的值。
@@ -226,7 +226,7 @@ func parseCondChoose(calls []*sqlCall) (types.Cond, error) {
 func parseSqlOperate(sc *sqlCall) (types.SQL, error) {
 	fn, ok := sqlParseFuncSet[sc.funcName]
 	if !ok {
-		return nil, fmt.Errorf("%s operate not found", sc.funcName)
+		return nil, errors.Errorf("%s operate not found", sc.funcName)
 	}
 
 	return fn(sc)

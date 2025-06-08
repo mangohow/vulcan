@@ -16,34 +16,34 @@ func Debugf(format string, args ...interface{}) {
 	if !strings.HasSuffix(format, "\n") {
 		format += "\n"
 	}
-	fmt.Printf(format, args...)
+	fmt.Fprintf(os.Stderr, format, args...)
 }
 
 func Logf(format string, args ...interface{}) {
 	if !strings.HasSuffix(format, "\n") {
 		format += "\n"
 	}
-	fmt.Printf(format, args...)
+	fmt.Fprintf(os.Stderr, format, args...)
 }
 
 func Infof(format string, args ...interface{}) {
 	if !strings.HasSuffix(format, "\n") {
 		format += "\n"
 	}
-	color.Green.Printf(format, args...)
+	fmt.Fprintf(os.Stderr, color.Green.Sprintf(format, args...))
 }
 
 func Errorf(format string, args ...interface{}) {
 	if !strings.HasSuffix(format, "\n") {
 		format += "\n"
 	}
-	color.Red.Printf(format, args...)
+	fmt.Fprintf(os.Stderr, color.Red.Sprintf(format, args...))
 }
 
 func Fatalf(format string, args ...interface{}) {
 	if !strings.HasSuffix(format, "\n") {
 		format += "\n"
 	}
-	color.Red.Printf(format, args...)
+	fmt.Fprintf(os.Stderr, color.Red.Sprintf(format, args...))
 	os.Exit(1)
 }

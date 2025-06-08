@@ -40,9 +40,9 @@ func TestPaginationInterceptor(t *testing.T) {
 
 	paging := NewPaging(1, 10).AddDescs("create_time")
 	paginationInterceptor.PreHandle(&ExecOption{
-		SqlStmt:  "SELECT username, password FROM t_user WHERE id > ?",
-		Execer:   fakeExecer{},
-		FirstArg: paging,
+		SqlStmt:   "SELECT username, password FROM t_user WHERE id > ?",
+		Execer:    fakeExecer{},
+		Extension: paging,
 	})
 	fmt.Printf("%+v\n", paging)
 }

@@ -19,10 +19,10 @@ type Execer interface {
 }
 
 type ExecOption struct {
-	SqlStmt  string `name:"sql"`
-	Args     []any  `name:"args"`
-	Execer   Execer `name:"execer"`
-	FirstArg any    `name:"firstArg"`
+	SqlStmt   string `name:"sql"`
+	Args      []any  `name:"args"`
+	Execer    Execer `name:"execer"`
+	Extension any    `name:"extension"`
 }
 
 type SQLType int

@@ -84,11 +84,11 @@ func SetupSqlDebugInterceptor(logger DebugLogger) {
 func SetupPaginationInterceptor() {
 	paginationInterceptor = FuncInterceptor{
 		PreHandlerFn: func(option *ExecOption) {
-			if option.FirstArg == nil || !strings.HasPrefix(option.SqlStmt, "SELECT") {
+			if option.Extension == nil || !strings.HasPrefix(option.SqlStmt, "SELECT") {
 				return
 			}
 
-			page, ok := option.FirstArg.(Page)
+			page, ok := option.Extension.(Page)
 			if !ok {
 				return
 			}

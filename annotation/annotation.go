@@ -4,19 +4,19 @@ const (
 	tip = "use vulcan to generate code"
 )
 
-func Select(sql string) {
+func Select(sql string) string {
 	panic(tip)
 }
 
-func Update(sql string) {
+func Update(sql string) string {
 	panic(tip)
 }
 
-func Insert(sql string) {
+func Insert(sql string) string {
 	panic(tip)
 }
 
-func Delete(sql string) {
+func Delete(sql string) string {
 	panic(tip)
 }
 
