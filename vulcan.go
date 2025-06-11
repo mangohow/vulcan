@@ -74,6 +74,27 @@ func StartTransaction() (*sqlx.Tx, error) {
 	return dbRef.Beginx()
 }
 
+func Transactional(fn func(opts ...Option) error) (err error) {
+	var tx *sqlx.Tx
+	tx, err = dbRef.Beginx()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		var e error
+		if r := recover(); r != nil || err != nil {
+			e = tx.Rollback()
+		} else {
+			e = tx.Commit()
+		}
+		if e != nil {
+			err = e
+		}
+	}()
+
+	return fn(WithTransaction(tx))
+}
+
 func OpenMysql(dataSourceName string) (*sqlx.DB, error) {
 	db, err := sqlx.Open("mysql", dataSourceName)
 	if err != nil {

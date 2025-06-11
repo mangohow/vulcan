@@ -6,14 +6,13 @@ import (
 	"github.com/mangohow/mangokit/tools/collection"
 	"github.com/mangohow/mangokit/tools/stream"
 	"github.com/mangohow/mangokit/tools/strutil"
-	"github.com/mangohow/vulcan"
-	"github.com/mangohow/vulcan/internal/ast/astutils"
-	"github.com/mangohow/vulcan/internal/ast/parser/types"
-	"github.com/mangohow/vulcan/internal/errors"
-	"github.com/mangohow/vulcan/internal/log"
-	"github.com/mangohow/vulcan/internal/utils"
-	"github.com/mangohow/vulcan/internal/utils/sqlutils"
-	"github.com/mangohow/vulcan/internal/version"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/astutils"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/log"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils/sqlutils"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/version"
 	"go/ast"
 	"go/format"
 	"go/token"
@@ -66,22 +65,23 @@ var (
 )
 
 func initExecOptionNames() {
-	rt := reflect.TypeOf(vulcan.ExecOption{})
-	n := rt.NumField()
-	for i := 0; i < n; i++ {
-		field := rt.Field(i)
-		tag := field.Tag.Get("name")
-		switch tag {
-		case "sql":
-			execOptionFieldSqlStmtName = field.Name
-		case "args":
-			execOptionFieldArgsName = field.Name
-		case "execer":
-			execOptionFieldExecerName = field.Name
-		case "extension":
-			execOptionFieldExtensionName = field.Name
-		}
-	}
+	// TODO
+	//rt := reflect.TypeOf(vulcan.ExecOption{})
+	//n := rt.NumField()
+	//for i := 0; i < n; i++ {
+	//    field := rt.Field(i)
+	//    tag := field.Tag.Get("name")
+	//    switch tag {
+	//    case "sql":
+	//        execOptionFieldSqlStmtName = field.Name
+	//    case "args":
+	//        execOptionFieldArgsName = field.Name
+	//    case "execer":
+	//        execOptionFieldExecerName = field.Name
+	//    case "extension":
+	//        execOptionFieldExtensionName = field.Name
+	//    }
+	//}
 }
 func init() {
 	initExecOptionNames()

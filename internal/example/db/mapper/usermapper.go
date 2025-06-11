@@ -20,33 +20,32 @@ func NewUserMapper(db *sqlx.DB) *UserMapper {
 	}
 }
 
-func (m *UserMapper) Add(user *model.User) error {
+func (m *UserMapper) Add(user *model.User) {
 	Insert(`INSERT INTO t_user (id, username, password, create_at, email, address) 
             VALUES (#{user.Id}, #{user.Username}, #{user.Password}, #{user.Create_at}, #{user.Email}, #{user.Address})`)
-	panic("")
 }
 
-func (m *UserMapper) DeleteById(id int) (int, error) {
+func (m *UserMapper) DeleteById(id int) int {
 	Delete("DELETE FROM t_user WHERE id = #{id}")
-	panic("")
+	return 0
 }
 
-func (m *UserMapper) UpdateById(user *model.User) (int, error) {
+func (m *UserMapper) UpdateById(user *model.User) int {
 	a := true
 	Update(SQL().Stmt("UPDATE t_user").
 		Set(If(user.Password != "", "password = #{user.Password}").
 			If(user.Email != "", "email = #{user.Email}").
 			If(user.Address != "" && (user.Id > 0 || a), "address = #{user.Address}")).
 		Stmt("WHERE id = #{user.Id}").Build())
-	panic("")
+	return 0
 }
 
-func (m *UserMapper) FindById(id int) (*model.User, error) {
+func (m *UserMapper) FindById(id int) *model.User {
 	Select("SELECT * FROM t_user WHERE id = #{id}")
-	panic("")
+	return nil
 }
 
-func (m *UserMapper) Find(user *model.User) (*model.User, error) {
+func (m *UserMapper) Find(user *model.User) *model.User {
 	Select(SQL().
 		Stmt("SELECT * FROM t_user").
 		Where(If(user.Username != "", "username = #{user.Username}").
@@ -55,15 +54,14 @@ func (m *UserMapper) Find(user *model.User) (*model.User, error) {
 	panic("")
 }
 
-func (m *UserMapper) BatchAdd(users []*model.User) error {
+func (m *UserMapper) BatchAdd(users []*model.User) {
 	Insert(SQL().
 		Stmt("INSERT INTO t_user (id, username, password, create_at, email, address) VALUES ").
 		Foreach("users", "user", " ", "", "",
 			"(#{user.Id}, #{user.Username}, #{user.Password}, #{user.CreateAt}, #{user.Email}, #{user.Address})").Build())
-	panic("")
 }
 
-func (m *UserMapper) UpdateByIdOrUsername(user *model.User) error {
+func (m *UserMapper) UpdateByIdOrUsername(user *model.User) {
 	Update(SQL().
 		Stmt("UPDATE t_user").
 		Set(If(user.Password != "", "password = #{user.Password}").
@@ -71,13 +69,12 @@ func (m *UserMapper) UpdateByIdOrUsername(user *model.User) error {
 		Where(Choose().When(user.Id > 0, "id = #{user.Id}").
 			When(user.Username != "", "username = #{user.Username}")).
 		Build())
-	panic("")
 }
 
-func (u *UserMapper) SelectPage(page vulcan.Page, cond *model.QueryCond) ([]*model.User, error) {
+func (u *UserMapper) SelectPage(page vulcan.Page, cond *model.QueryCond) []*model.User {
 	Select(SQL().
 		Stmt("SELECT * FROM t_user").
 		Where(If(cond.Username != "", "And username = #{cond.Username}").
 			If(cond.Address != "", "AND address = #{cond.Address} ")).Build())
-	panic("")
+	return nil
 }

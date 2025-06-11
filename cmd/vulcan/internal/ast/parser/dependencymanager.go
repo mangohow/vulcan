@@ -2,9 +2,9 @@ package parser
 
 import (
 	"github.com/mangohow/mangokit/tools/stream"
-	"github.com/mangohow/vulcan/internal/ast/parser/types"
-	"github.com/mangohow/vulcan/internal/errors"
-	"github.com/mangohow/vulcan/internal/utils"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils"
 	"go/ast"
 	"go/token"
 	"golang.org/x/tools/go/packages"

@@ -2,7 +2,7 @@ package types
 
 import (
 	"fmt"
-	"github.com/mangohow/vulcan/internal/utils/stringutils"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils/stringutils"
 	"go/ast"
 	"io"
 	"regexp"

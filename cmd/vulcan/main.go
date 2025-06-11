@@ -1,11 +1,11 @@
 package main
 
 import (
-	"github.com/mangohow/vulcan/internal/ast/generator/dbgenerator"
-	parser2 "github.com/mangohow/vulcan/internal/ast/parser"
-	"github.com/mangohow/vulcan/internal/ast/parser/dbparser"
-	"github.com/mangohow/vulcan/internal/errors"
-	"github.com/mangohow/vulcan/internal/log"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/generator/dbgenerator"
+	parser2 "github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/dbparser"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/log"
 	"github.com/spf13/cobra"
 	"go/token"
 	"os"

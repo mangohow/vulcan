@@ -2,7 +2,7 @@ package dbparser
 
 import (
 	"fmt"
-	"github.com/mangohow/vulcan/internal/ast/parser/types"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 	"go/parser"
 	"go/token"
 	"log"

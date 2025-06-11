@@ -3,7 +3,7 @@ package astutils
 import (
 	"fmt"
 	"github.com/mangohow/mangokit/tools/collection"
-	"github.com/mangohow/vulcan/internal/ast/parser/types"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 	"go/ast"
 	gotoken "go/token"
 	"path/filepath"

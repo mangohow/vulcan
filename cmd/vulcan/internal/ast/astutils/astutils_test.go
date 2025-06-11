@@ -3,7 +3,7 @@ package astutils
 import (
 	"bytes"
 	"fmt"
-	"github.com/mangohow/vulcan/internal/ast/parser/types"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 	"go/ast"
 	"go/format"
 	"go/parser"
