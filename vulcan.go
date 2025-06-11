@@ -3,19 +3,18 @@ package vulcan
 import (
 	"database/sql"
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/jmoiron/sqlx"
 )
 
 var (
-	dbRef *sqlx.DB
+	dbRef *sql.DB
 )
 
 type Execer interface {
 	Exec(query string, args ...any) (sql.Result, error)
 
-	Select(dest any, query string, args ...any) error
+	Query(query string, args ...any) (*sql.Rows, error)
 
-	Get(dest any, query string, args ...any) error
+	QueryRow(query string, args ...any) *sql.Row
 }
 
 type ExecOption struct {
@@ -54,12 +53,12 @@ func (e *ExecOption) Exec(query string, args ...any) (sql.Result, error) {
 	return e.Execer.Exec(query, args...)
 }
 
-func (e *ExecOption) Select(dest any, query string, args ...any) error {
-	return e.Execer.Select(dest, query, args...)
+func (e *ExecOption) Select(query string, args ...any) (*sql.Rows, error) {
+	return e.Execer.Query(query, args...)
 }
 
-func (e *ExecOption) Get(dest any, query string, args ...any) error {
-	return e.Execer.Get(dest, query, args...)
+func (e *ExecOption) Get(query string, args ...any) *sql.Row {
+	return e.Execer.QueryRow(query, args...)
 }
 
 type Option func(*ExecOption)
@@ -70,13 +69,13 @@ func WithTransaction(execer Execer) Option {
 	}
 }
 
-func StartTransaction() (*sqlx.Tx, error) {
-	return dbRef.Beginx()
+func StartTransaction() (*sql.Tx, error) {
+	return dbRef.Begin()
 }
 
 func Transactional(fn func(opts ...Option) error) (err error) {
-	var tx *sqlx.Tx
-	tx, err = dbRef.Beginx()
+	var tx *sql.Tx
+	tx, err = dbRef.Begin()
 	if err != nil {
 		return err
 	}
@@ -95,8 +94,8 @@ func Transactional(fn func(opts ...Option) error) (err error) {
 	return fn(WithTransaction(tx))
 }
 
-func OpenMysql(dataSourceName string) (*sqlx.DB, error) {
-	db, err := sqlx.Open("mysql", dataSourceName)
+func OpenMysql(dataSourceName string) (*sql.DB, error) {
+	db, err := sql.Open("mysql", dataSourceName)
 	if err != nil {
 		return nil, err
 	}

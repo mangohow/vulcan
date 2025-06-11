@@ -267,7 +267,8 @@ loop:
 	}
 
 	if len(receiver.Names) == 0 || receiver.Names[0].Name == "_" {
-		return errors.Errorf("receiver must have a name")
+		// 生成receiver name
+		receiver.Names = []*ast.Ident{ast.NewIdent(genReceiverName(name))}
 	}
 
 	receiverType.Name = name
@@ -322,6 +323,14 @@ loop:
 	}
 
 	return errors.Errorf("type %s must have a field which type is *sqlx.DB", name)
+}
+
+func genReceiverName(name string) string {
+	if name == "" {
+		return "s"
+	}
+
+	return strings.ToLower(name[:1])
 }
 
 // 解析入参数据类型
@@ -437,17 +446,16 @@ loop:
 }
 
 // 解析出参数据类型
-// 出参的数量为1~2个
-// 如果只有一个参数那么必须是error
-// 如果有两个参数, 第二个必须是error, 第一个参数可以为结构体、结构体指针、切片（切片元素为结构体、切片元素为结构体指针、基本类型）、基本类型）
-// 第一个参数不能为基本类型的指针, 没有意义
+// 出参的数量为0~1个
+// 如果有参数, 该参数可以为结构体、结构体指针、切片（切片元素为结构体、切片元素为结构体指针、基本类型）、基本类型）
+// 参数不能为基本类型的指针, 没有意义
 func (p *FileParser) parseOutputParameter(params []*ast.Field, fnDecl *types.FuncDecl, pkgInfo types.PackageInfo) error {
 	// 检查出参类型
 	// 查询时: 第一个为结构体、基本类型、切片或指针
 	// 增删改: 第一个参数为Number类型(int, int64, ..., uint, uint64...), 或只有一个error参数
 	// 第二个为error类型
-	if len(params) < 1 || len(params) > 2 {
-		return errors.Errorf("function must return 1 or 2 results, and the last must be error type")
+	if len(params) > 2 {
+		return errors.Errorf("function must return 0 or 1 results")
 	}
 
 	for _, p := range params {
@@ -456,23 +464,16 @@ func (p *FileParser) parseOutputParameter(params []*ast.Field, fnDecl *types.Fun
 		}
 	}
 
-	errField := params[0]
-	if len(params) == 2 {
-		errField = params[1]
-	}
-	if err := p.checkErrOutputParameter(errField); err != nil {
-		return err
-	}
-
-	if len(params) == 1 {
+	if len(params) == 0 {
 		return nil
 	}
 
 	paramType := &types.Param{}
-	if len(params[0].Names) > 0 && params[0].Names[0] != nil {
-		paramType.Name = params[0].Names[0].Name
+	resultField := params[0]
+	if len(resultField.Names) > 0 && resultField.Names[0] != nil {
+		paramType.Name = resultField.Names[0].Name
 	}
-	if err := p.parseFieldExpr(params[0].Type, paramType, pkgInfo); err != nil {
+	if err := p.parseFieldExpr(resultField.Type, paramType, pkgInfo); err != nil {
 		return err
 	}
 

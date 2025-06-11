@@ -3,8 +3,8 @@
 package mapper
 
 import (
+	"database/sql"
 	"fmt"
-	"github.com/jmoiron/sqlx"
 	"github.com/mangohow/vulcan"
 	"github.com/mangohow/vulcan/internal/example/model"
 	"time"
@@ -43,10 +43,10 @@ type TestStruct2 struct {
 }
 
 type UserMapper struct {
-	db *sqlx.DB
+	db *sql.DB
 }
 
-func NewUserMapper(db *sqlx.DB) *UserMapper {
+func NewUserMapper(db *sql.DB) *UserMapper {
 	return &UserMapper{
 		db: db,
 	}
@@ -124,13 +124,13 @@ func (m *UserMapper) DeleteById(id int, opts ...vulcan.Option) (int, error) {
 
 func (m *UserMapper) FindById(id int, opts ...vulcan.Option) (*model.User, error) {
 	option := &vulcan.ExecOption{
-		SqlStmt: "SELECT * FROM t_user WHERE id = ?",
+		SqlStmt: "SELECT id, username, password, created_at, email, address FROM t_user WHERE id = ?",
 		Args:    []any{id},
 		Execer:  m.db,
 	}
 	vulcan.InvokePreHandler(option, opts...)
 	res := &model.User{}
-	err := option.Select(&res, option.SqlStmt, option.Args...)
+	err := option.Get(option.SqlStmt, option.Args...).Scan(&res.Id, &res.Username, &res.Password, &res.CreatedAt, &res.Email, &res.Address)
 	vulcan.InvokePostHandler(vulcan.NewResultOption(vulcan.SQLTypeSelect, res, err, nil))
 	if err != nil {
 		return nil, err
@@ -190,7 +190,7 @@ func (m *UserMapper) UpdateById(user *model.User, opts ...vulcan.Option) (int, e
 
 func (m *UserMapper) Find(user *model.User) (*model.User, error) {
 	builder := vulcan.NewSqlBuild(128, 2, 0)
-	builder.AppendStmt("SELECT * FROM t_user")
+	builder.AppendStmt("SELECT id, username, password, created_at, email, address FROM t_user")
 	builder.AppendWhereStmtConditional(user.Username != "", user.Username, "AND username = ?").
 		AppendWhereStmtConditional(user.Password != "", user.Password, "AND password = ?").
 		EndWhereStmt()
@@ -202,7 +202,7 @@ func (m *UserMapper) Find(user *model.User) (*model.User, error) {
 	}
 	vulcan.InvokePreHandler(option)
 	res := &model.User{}
-	err := option.Select(res, option.SqlStmt, option.Args...)
+	err := option.Get(option.SqlStmt, option.Args...).Scan(&res.Id, &res.Username, &res.Password, &res.CreatedAt, &res.Email, &res.Address)
 	vulcan.InvokePostHandler(vulcan.NewResultOption(vulcan.SQLTypeSelect, res, err, nil))
 	if err != nil {
 		return nil, err
@@ -213,7 +213,7 @@ func (m *UserMapper) Find(user *model.User) (*model.User, error) {
 
 func (m *UserMapper) Find2(user *model.User) (model.User, error) {
 	builder := vulcan.NewSqlBuild(128, 2, 0)
-	builder.AppendStmt("SELECT * FROM t_user")
+	builder.AppendStmt("SELECT id, username, password, created_at, email, address FROM t_user")
 	builder.AppendWhereStmtConditional(user.Username != "", user.Username, "AND username = ?").
 		AppendWhereStmtConditional(user.Password != "", user.Password, "AND password = ?").
 		EndWhereStmt()
@@ -225,7 +225,7 @@ func (m *UserMapper) Find2(user *model.User) (model.User, error) {
 	}
 	vulcan.InvokePreHandler(option)
 	res := model.User{}
-	err := option.Select(res, option.SqlStmt, option.Args...)
+	err := option.Get(option.SqlStmt, option.Args...).Scan(&res.Id, &res.Username, &res.Password, &res.CreatedAt, &res.Email, &res.Address)
 	vulcan.InvokePostHandler(vulcan.NewResultOption(vulcan.SQLTypeSelect, res, err, nil))
 	if err != nil {
 		return res, err
@@ -287,7 +287,7 @@ func (m *UserMapper) UpdateByIdOrUsername(user *model.User, opts ...vulcan.Optio
 
 func (u *UserMapper) SelectPage(page vulcan.Page, cond *model.QueryCond) ([]*model.User, error) {
 	builder := vulcan.NewSqlBuild(128, 2, 0)
-	builder.AppendStmt("SELECT * FROM t_user ")
+	builder.AppendStmt("SELECT id, username, password, created_at, email, address FROM t_user ")
 	builder.AppendWhereStmtConditional(cond.Username != "", cond.Username, "AND username = ?").
 		AppendWhereStmtConditional(cond.Address != "", cond.Address, "AND address = ?").
 		EndWhereStmt()
@@ -299,10 +299,15 @@ func (u *UserMapper) SelectPage(page vulcan.Page, cond *model.QueryCond) ([]*mod
 	}
 	vulcan.InvokePreHandler(option)
 	res := []*model.User{}
-	err := option.Select(&res, option.SqlStmt, option.Args...)
+	rows, err := option.Select(option.SqlStmt, option.Args...)
 	vulcan.InvokePostHandler(vulcan.NewResultOption(vulcan.SQLTypeSelect, res, err, nil))
 	if err != nil {
 		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		obj := &model.User{}
+		rows.Scan(&obj.Id, &obj.Username, &obj.Password, &obj.CreatedAt, &obj.Email, &obj.Address)
 	}
 
 	return res, nil
