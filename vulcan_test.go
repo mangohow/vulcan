@@ -15,7 +15,11 @@ func (d debugLogger) Debug(format string, args ...any) {
 type fakeExecer struct {
 }
 
-func (f fakeExecer) Get(dest any, query string, args ...any) error {
+func (f fakeExecer) Query(query string, args ...any) (*sql.Rows, error) {
+	return nil, nil
+}
+
+func (f fakeExecer) QueryRow(query string, args ...any) *sql.Row {
 	return nil
 }
 
@@ -28,10 +32,6 @@ func (f fakeExecer) Exec(query string, args ...any) (sql.Result, error) {
 		}
 	}
 	return nil, nil
-}
-
-func (f fakeExecer) Select(dest any, query string, args ...any) error {
-	return nil
 }
 
 func TestPaginationInterceptor(t *testing.T) {

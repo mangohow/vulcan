@@ -8,26 +8,30 @@ import (
 	"strings"
 )
 
-func ParseSelectFields(sql string, paramSpec *types.Param) ([]string, []string, error) {
+func ParseSelectFields(sql string, paramSpec *types.Param) ([]string, []string, bool, error) {
 	stmt, err := sqlparser.Parse(sql)
 	if err != nil {
-		return nil, nil, errors.Wrapf(err, "parse sql %s failed", sql)
+		return nil, nil, false, errors.Wrapf(err, "parse sql %s failed", sql)
 	}
 
 	switch st := stmt.(type) {
 	case *sqlparser.Select:
-		return parseSelectFields(st, paramSpec)
+		return parseSelectFields(sql, st, paramSpec)
 	default:
-		return nil, nil, nil
+		return nil, nil, false, nil
 	}
 }
 
-func parseSelectFields(selectStmt *sqlparser.Select, paramSpec *types.Param) ([]string, []string, error) {
+func parseSelectFields(sql string, selectStmt *sqlparser.Select, paramSpec *types.Param) ([]string, []string, bool, error) {
 	var aliasedExprs []*sqlparser.AliasedExpr
 	for _, selectExpr := range selectStmt.SelectExprs {
 		switch expr := selectExpr.(type) {
 		case *sqlparser.StarExpr:
-			return parseStarExpr(paramSpec)
+			tableFields, structFields, err := parseStarExpr(paramSpec)
+			if err != nil {
+				return nil, nil, true, err
+			}
+			return tableFields, structFields, true, nil
 		case *sqlparser.AliasedExpr:
 			aliasedExprs = append(aliasedExprs, expr)
 		case *sqlparser.Nextval:
@@ -35,10 +39,14 @@ func parseSelectFields(selectStmt *sqlparser.Select, paramSpec *types.Param) ([]
 	}
 
 	if len(aliasedExprs) != 0 {
-		return parseAliasedExprs(aliasedExprs, paramSpec)
+		tableFields, structFields, err := parseAliasedExprs(aliasedExprs, paramSpec)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		return tableFields, structFields, false, nil
 	}
 
-	return nil, nil, nil
+	return nil, nil, false, errors.Errorf("invalid select stmt %s", sql)
 }
 
 func parseStarExpr(paramSpec *types.Param) ([]string, []string, error) {

@@ -2,6 +2,7 @@ package vulcan
 
 import (
 	"database/sql"
+	"fmt"
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -83,6 +84,9 @@ func Transactional(fn func(opts ...Option) error) (err error) {
 		var e error
 		if r := recover(); r != nil || err != nil {
 			e = tx.Rollback()
+			if e == nil && r != nil {
+				e = fmt.Errorf("recovered from %v", r)
+			}
 		} else {
 			e = tx.Commit()
 		}

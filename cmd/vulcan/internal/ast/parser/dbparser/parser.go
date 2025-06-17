@@ -520,6 +520,16 @@ func (p *FileParser) parseFuncBody(body *ast.BlockStmt, fnDecl *types.FuncDecl, 
 		if sbl.Kind != token.STRING {
 			return errors.Errorf("sql is invalid")
 		}
+		sqlStr := strings.Trim(sbl.Value, "`\"")
+		// 如果是select语句, 则需要找到select表字段和结构体字段的对应关系
+		if anno == types.SQLSelectFunc {
+			var err error
+			sqlStr, err = p.parseStaticSqlStmt(sqlStr, fnDecl)
+			if err != nil {
+				return err
+			}
+		}
+
 		fnDecl.Sql = append(fnDecl.Sql, types.NewRawSQL(strings.Trim(sbl.Value, "`\"")))
 
 		return nil
@@ -550,6 +560,30 @@ func (p *FileParser) parseFuncBody(body *ast.BlockStmt, fnDecl *types.FuncDecl, 
 
 	return nil
 }
+
+func (p *FileParser) parseStaticSqlStmt(sql string, fnDecl *types.FuncDecl) (string, error) {
+	// 如果返回值不为结构体类型
+	returnType := &fnDecl.FuncReturnResultParam.Type
+	returnType = returnType.GetValueType()
+	if returnType.IsBasicType() {
+		fnDecl.SelectFields = append(fnDecl.SelectFields, fnDecl.FuncReturnResultParam.Name)
+		return sql, nil
+	}
+
+	tableFields, structFields, star, err := ParseSelectFields(sql, fnDecl.FuncReturnResultParam)
+	if err != nil {
+		return "", errors.Wrapf(err, "parse sql %s error", sql)
+	}
+
+	// 替换SELECT *中的*为具体的字段
+	if star {
+		sql = strings.Replace(sql, " * ", " "+strings.Join(tableFields, ", ")+" ", 1)
+	}
+	fnDecl.SelectFields = structFields
+
+	return sql, nil
+}
+
 func parseAllCallExprDepth(expr ast.Expr) []*sqlCall {
 	var (
 		fn  func(expr ast.Expr) *sqlCall

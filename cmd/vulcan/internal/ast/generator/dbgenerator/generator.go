@@ -45,6 +45,7 @@ var (
 	dbSelectOptName = "Select"
 	dbGetOptName    = "Get"
 	dbExecOptName   = "Exec"
+	dbScanOptName   = "Scan"
 
 	sqlTypeInsertName = "SQLTypeInsert"
 	sqlTypeUpdateName = "SQLTypeUpdate"
@@ -122,6 +123,11 @@ func (g *FileGenerator) generateAst(decl *types.Declaration) error {
 	g.optsName = optsMame
 	ellipsis := astutils.BuildEllipsisField(optsMame, "vulcan.Option")
 	fnDecl.Type.Params.List = append(fnDecl.Type.Params.List, ellipsis)
+
+	// 向函数中添加error返回值
+	fnDecl.Type.Results.List = append(fnDecl.Type.Results.List, &ast.Field{
+		Type: ast.NewIdent("error"),
+	})
 
 	// 生成函数体
 	body, err := g.generateFuncBodyAst(decl)
@@ -203,20 +209,26 @@ func (g *FileGenerator) generateStaticSqlFuncBodyAst(decl *types.Declaration, sq
 	}
 
 	// 构建数据库操作语句
-	execArgs := make([]*astutils.FuncArg, 0, 3)
+
 	if decl.SqlFuncDecl.Annotation == types.SQLSelectFunc {
-		andFlag := false
-		if t := decl.SqlFuncDecl.FuncReturnResultParam.Type; t.IsSlice() || !t.IsPointer() {
-			andFlag = true
+		returnType := &decl.SqlFuncDecl.FuncReturnResultParam.Type
+		var stmts []ast.Stmt
+		// 处理批量查询
+		if returnType.IsSlice() {
+			stmts = g.generateDBSelectStmt(decl)
+		} else if returnType = returnType.GetValueType(); returnType.IsStruct() { // 处理单条记录的查询
+			stmts = g.generateDBGetStmt(decl)
 		}
-		execArgs = append(execArgs, &astutils.FuncArg{Name: options.sqlOperationResultName, AndFlag: andFlag})
+		body.List = append(body.List, stmts...)
+	} else {
+		execArgs := make([]*astutils.FuncArg, 0, 3)
+		execArgs = append(execArgs, stream.Map(options.sqlExecuteArgsName, func(v string) *astutils.FuncArg {
+			return &astutils.FuncArg{Name: v}
+		})...)
+		dbCallExpr := astutils.BuildDefineStmtByExpr(astutils.BuildIdentList(options.sqlExecuteResultName...),
+			[]ast.Expr{astutils.BuildSimpleCallAssign(options.execOptionName+"."+options.sqlOperationName, execArgs, true)})
+		body.List = append(body.List, dbCallExpr)
 	}
-	execArgs = append(execArgs, stream.Map(options.sqlExecuteArgsName, func(v string) *astutils.FuncArg {
-		return &astutils.FuncArg{Name: v}
-	})...)
-	dbCallExpr := astutils.BuildDefineStmtByExpr(astutils.BuildIdentList(options.sqlExecuteResultName...),
-		[]ast.Expr{astutils.BuildSimpleCallAssign(options.execOptionName+"."+options.sqlOperationName, execArgs, true)})
-	body.List = append(body.List, dbCallExpr)
 
 	// 构建拦截器postHandle调用语句
 	postInterceptorCall := astutils.BuildCallExpr(astutils.BuildIdentOrSelectorExpr(corePackageName+"."+invokePostHandlerName), []ast.Expr{
@@ -732,6 +744,15 @@ func (g *FileGenerator) generateCode(filename string) error {
 	fmt.Fprint(file, source)
 
 	log.Infof("Generate go file %s!", filename)
+	return nil
+}
+
+func (g *FileGenerator) generateDBSelectStmt(decl *types.Declaration) []ast.Stmt {
+	return nil
+}
+
+func (g *FileGenerator) generateDBGetStmt(decl *types.Declaration) []ast.Stmt {
+
 	return nil
 }
 

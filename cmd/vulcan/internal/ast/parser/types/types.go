@@ -63,6 +63,7 @@ type FuncDecl struct {
 	FuncReturnResultParam *Param            // 函数出参1类型
 	Sql                   []SQL             // SQL体
 	Annotation            string            // SQL类型 Insert、Delete、Update、Select
+	SelectFields          []string          // select语句中对应结构体中字段的名称
 }
 
 // 是否是基本类型
@@ -108,4 +109,12 @@ func (t *TypeSpec) IsBasicType() bool {
 	}
 
 	return false
+}
+
+func (t *TypeSpec) GetValueType() *TypeSpec {
+	if t.IsPointer() || t.IsSlice() {
+		return t.ValueType
+	}
+
+	return t
 }
