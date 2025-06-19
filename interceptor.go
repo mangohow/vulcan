@@ -92,6 +92,9 @@ func SetupPaginationInterceptor() {
 			if !ok {
 				return
 			}
+			if page.PageSize() == 0 && page.CurrentPage() == 0 {
+				return
+			}
 
 			tail := fmt.Sprintf(" LIMIT %d, %d", page.PageSize(), (page.CurrentPage()-1)*page.PageSize())
 			if len(page.Orders()) != 0 {

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"go/ast"
 	"reflect"
+
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils/sqlutils"
 )
 
 type PackageInfo struct {
@@ -56,14 +58,15 @@ type Declaration struct {
 }
 
 type FuncDecl struct {
-	FuncName              string            // 函数名
-	Receiver              *Param            // 接收器参数信息
-	InputParam            map[string]*Param // 入参信息
-	OutputParam           map[string]*Param // 出参信息
-	FuncReturnResultParam *Param            // 函数出参1类型
-	Sql                   []SQL             // SQL体
-	Annotation            string            // SQL类型 Insert、Delete、Update、Select
-	SelectFields          []string          // select语句中对应结构体中字段的名称
+	FuncName              string                   // 函数名
+	Receiver              *Param                   // 接收器参数信息
+	InputParam            map[string]*Param        // 入参信息
+	OutputParam           map[string]*Param        // 出参信息
+	FuncReturnResultParam *Param                   // 函数出参1类型
+	Sql                   []SQL                    // SQL体
+	Annotation            string                   // SQL类型 Insert、Delete、Update、Select
+	SelectFields          []string                 // select语句中对应结构体中字段的名称
+	SqlParseResult        *sqlutils.SqlParseResult // 解析出sql中的#{field}
 }
 
 // 是否是基本类型

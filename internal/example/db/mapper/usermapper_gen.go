@@ -5,9 +5,10 @@ package mapper
 import (
 	"database/sql"
 	"fmt"
+	"time"
+
 	"github.com/mangohow/vulcan"
 	"github.com/mangohow/vulcan/internal/example/model"
-	"time"
 )
 
 type Int int
@@ -307,7 +308,11 @@ func (u *UserMapper) SelectPage(page vulcan.Page, cond *model.QueryCond) ([]*mod
 	defer rows.Close()
 	for rows.Next() {
 		obj := &model.User{}
-		rows.Scan(&obj.Id, &obj.Username, &obj.Password, &obj.CreatedAt, &obj.Email, &obj.Address)
+		err = rows.Scan(&obj.Id, &obj.Username, &obj.Password, &obj.CreatedAt, &obj.Email, &obj.Address)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, obj)
 	}
 
 	return res, nil

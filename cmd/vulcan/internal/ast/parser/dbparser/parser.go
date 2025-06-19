@@ -3,6 +3,13 @@ package dbparser
 import (
 	"bytes"
 	"fmt"
+	"go/ast"
+	astparser "go/parser"
+	"go/token"
+	"os"
+	"reflect"
+	"strings"
+
 	"github.com/mangohow/mangokit/tools/collection"
 	"github.com/mangohow/mangokit/tools/stream"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/astutils"
@@ -10,17 +17,12 @@ import (
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils"
-	"go/ast"
-	astparser "go/parser"
-	"go/token"
-	"os"
-	"reflect"
-	"strings"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils/sqlutils"
 )
 
 const (
-	dbOperatorPackageName = "github.com/jmoiron/sqlx"
-	dbOperatorRefName     = "sqlx"
+	dbOperatorPackageName = "database/sql"
+	dbOperatorRefName     = "sql"
 	dbOperatorTypeName    = "DB"
 )
 
@@ -230,7 +232,11 @@ func (p *FileParser) parseFuncDeclare(fd *ast.FuncDecl, pkgInfo types.PackageInf
 	}
 
 	// 3. 处理出参
-	if err := p.parseOutputParameter(fd.Type.Results.List, res, pkgInfo); err != nil {
+	var outputFields []*ast.Field
+	if fd.Type.Results != nil {
+		outputFields = fd.Type.Results.List
+	}
+	if err := p.parseOutputParameter(outputFields, res, pkgInfo); err != nil {
 		return nil, err
 	}
 
@@ -450,6 +456,14 @@ loop:
 // 如果有参数, 该参数可以为结构体、结构体指针、切片（切片元素为结构体、切片元素为结构体指针、基本类型）、基本类型）
 // 参数不能为基本类型的指针, 没有意义
 func (p *FileParser) parseOutputParameter(params []*ast.Field, fnDecl *types.FuncDecl, pkgInfo types.PackageInfo) error {
+	if fnDecl.Annotation == types.SQLSelectFunc && len(params) == 0 {
+		return errors.Errorf("Select stmt must have return parameter")
+	}
+
+	if len(params) == 0 {
+		return nil
+	}
+
 	// 检查出参类型
 	// 查询时: 第一个为结构体、基本类型、切片或指针
 	// 增删改: 第一个参数为Number类型(int, int64, ..., uint, uint64...), 或只有一个error参数
@@ -462,10 +476,6 @@ func (p *FileParser) parseOutputParameter(params []*ast.Field, fnDecl *types.Fun
 		if len(p.Names) != 0 {
 			return errors.Errorf("output parameter must not have default name")
 		}
-	}
-
-	if len(params) == 0 {
-		return nil
 	}
 
 	paramType := &types.Param{}
@@ -520,7 +530,12 @@ func (p *FileParser) parseFuncBody(body *ast.BlockStmt, fnDecl *types.FuncDecl, 
 		if sbl.Kind != token.STRING {
 			return errors.Errorf("sql is invalid")
 		}
-		sqlStr := strings.Trim(sbl.Value, "`\"")
+		sqlStr := strings.Trim(sbl.Value, "\r\n`\"")
+		// 对sql进行解析, 解析出参数列表, 并替换为?
+		sqlInfo := sqlutils.ParseSQLStmt(sqlStr)
+		sqlStr = sqlInfo.SQL
+		fnDecl.SqlParseResult = sqlInfo
+
 		// 如果是select语句, 则需要找到select表字段和结构体字段的对应关系
 		if anno == types.SQLSelectFunc {
 			var err error
@@ -530,7 +545,7 @@ func (p *FileParser) parseFuncBody(body *ast.BlockStmt, fnDecl *types.FuncDecl, 
 			}
 		}
 
-		fnDecl.Sql = append(fnDecl.Sql, types.NewRawSQL(strings.Trim(sbl.Value, "`\"")))
+		fnDecl.Sql = append(fnDecl.Sql, types.NewRawSQL(sqlStr))
 
 		return nil
 	}
