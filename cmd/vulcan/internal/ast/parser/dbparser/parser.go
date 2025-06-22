@@ -442,7 +442,7 @@ loop:
 
 		typeInfo, err = p.typeParser.GetTypeInfo(pkgInfo.FilePath, found.AbsPackagePath, typeName)
 		if err != nil {
-			return errors.Errorf("can't find type %s.%s's declartion, %w", typePkgName, typeName, err)
+			return errors.Wrapf(err, "type %s.%s invalid", typePkgName, typeName)
 		}
 
 		*typeSpec = *typeInfo.Type
@@ -490,7 +490,8 @@ func (p *FileParser) parseOutputParameter(params []*ast.Field, fnDecl *types.Fun
 	fnDecl.FuncReturnResultParam = paramType
 
 	if fnDecl.Annotation == types.SQLSelectFunc {
-		return nil
+		// 如果出参为结构体，对其中的字段进行校验
+		return p.checkOutputParameterInvalid(paramType)
 	}
 
 	// 增删改, 第一个参数必须为int或uint族类型
@@ -503,10 +504,26 @@ func (p *FileParser) parseOutputParameter(params []*ast.Field, fnDecl *types.Fun
 	return nil
 }
 
-func (p *FileParser) checkErrOutputParameter(field *ast.Field) error {
-	ident, ok := field.Type.(*ast.Ident)
-	if !ok || ident.Name != "error" {
-		return errors.Errorf("function must return 1 or 2 results, and the last must be error type")
+/*
+*
+对返回值结构体中的字段类型进行校验
+只有基本类型和处于白名单类型列表中的类型是被允许的
+并且结构体的所有字段都不能为指针类型
+*/
+func (p *FileParser) checkOutputParameterInvalid(param *types.Param) error {
+	if !param.Type.GetValueType().IsStruct() {
+		return nil
+	}
+
+	for _, field := range param.Type.GetValueType().Fields {
+		if field.Type.IsPointer() {
+			return errors.Errorf("fields of pointer type are not allowed in the struct, field: %s, struct: %s", field.Name, param.Type.GetValueType().Name)
+		}
+
+		ok := isTypeInWhitelist(field)
+		if !ok {
+			return errors.Errorf("invalid field type %s in struct %s", field.Type.Name, param.Type.Name)
+		}
 	}
 
 	return nil

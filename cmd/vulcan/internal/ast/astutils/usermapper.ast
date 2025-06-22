@@ -2151,8 +2151,8 @@
   2150  .  Scope: *ast.Scope {
   2151  .  .  Outer: nil
   2152  .  .  Objects: map[string]*ast.Object (len = 2) {
-  2153  .  .  .  "UserMapper": *(obj @ 84)
-  2154  .  .  .  "NewUserMapper": *(obj @ 148)
+  2153  .  .  .  "NewUserMapper": *(obj @ 148)
+  2154  .  .  .  "UserMapper": *(obj @ 84)
   2155  .  .  }
   2156  .  }
   2157  .  Imports: []*ast.ImportSpec (len = 4) {

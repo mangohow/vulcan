@@ -2,10 +2,9 @@ package types
 
 import (
 	"encoding/json"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils/sqlutils"
 	"go/ast"
 	"reflect"
-
-	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils/sqlutils"
 )
 
 type PackageInfo struct {
@@ -114,10 +113,15 @@ func (t *TypeSpec) IsBasicType() bool {
 	return false
 }
 
+func (t *TypeSpec) IsInterface() bool {
+	return t.Kind == reflect.Interface
+}
+
 func (t *TypeSpec) GetValueType() *TypeSpec {
-	if t.IsPointer() || t.IsSlice() {
-		return t.ValueType
+	temp := t
+	for temp.IsPointer() || temp.IsSlice() {
+		temp = temp.ValueType
 	}
 
-	return t
+	return temp
 }

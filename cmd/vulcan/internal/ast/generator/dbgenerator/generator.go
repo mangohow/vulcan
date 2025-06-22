@@ -171,7 +171,7 @@ func (g *FileGenerator) generateStaticSqlFuncBodyAst(decl *types.Declaration, sq
 
 	// 如果有扩展字段则需要传入ExecOption
 	for _, param := range decl.SqlFuncDecl.InputParam {
-		if param.Type.Kind == reflect.Interface && param.Type.Name == "Page" && param.Type.Package.PackagePath == corePackagePath {
+		if types.IsRegisteredExtension(param) {
 			composite.Elts = append(composite.Elts, astutils.BuildKeyValueBasicLitExpr(execOptionFieldExtensionName, param.Name, token.STRING))
 		}
 	}

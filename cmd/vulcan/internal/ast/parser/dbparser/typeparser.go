@@ -1,15 +1,16 @@
 package dbparser
 
 import (
+	"go/ast"
+	"reflect"
+	"strings"
+
 	"github.com/mangohow/mangokit/tools/math"
 	"github.com/mangohow/mangokit/tools/stream"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils"
-	"go/ast"
-	"reflect"
-	"strings"
 )
 
 type TypeInfo struct {
@@ -43,24 +44,34 @@ var unsupportedKind = map[string]reflect.Kind{
 // 无需解析的一些类型，比如time.Time
 var innerType = map[[2]string][]innerTypeInfo{
 	// [2]string{absPkg, shortPkg}: typeName
-	[2]string{"time", "time"}: {
-		{
-			typeName: "Time",
-			kind:     reflect.Struct,
-		},
-	},
-	[2]string{"github.com/jmoiron/sqlx", "sqlx"}: {
+	[2]string{"database/sql", "sql"}: {
 		{
 			typeName: "DB",
 			kind:     reflect.Struct,
 		},
 	},
-	[2]string{"github.com/mangohow/vulcan", "vulcan"}: {
-		{
-			typeName: "Page",
-			kind:     reflect.Interface,
-		},
-	},
+}
+
+func init() {
+	// 将白名单中的类型也加入进来
+	for packagePath, typesInfo := range registeredWhitelistTypes {
+		for typeName, kind := range typesInfo {
+			packageName := utils.GetPackageName(packagePath)
+			innerType[[2]string{packagePath, packageName}] = append(innerType[[2]string{packagePath, packageName}], innerTypeInfo{
+				typeName: typeName,
+				kind:     kind,
+			})
+		}
+	}
+
+	// 将extension也加入进来
+	for _, ext := range types.RegisteredExtensions {
+		key := [2]string{ext.PackagePath, ext.PackageName}
+		innerType[key] = append(innerType[key], innerTypeInfo{
+			typeName: ext.Name,
+			kind:     ext.Kind,
+		})
+	}
 }
 
 type TypeCache map[string]map[string]*TypeInfo
@@ -118,7 +129,7 @@ func (p *TypeParser) GetTypeInfo(filePath, pkgPath, typeName string) (*TypeInfo,
 	}
 	err = p.parseAstType(parsedType, st)
 	if err != nil {
-		return nil, errors.Errorf("%v, typeName: %s", err, typeName)
+		return nil, err
 	}
 
 	typeInfo = &TypeInfo{
@@ -159,7 +170,7 @@ func (p *TypeParser) parseFieldExpr(expr ast.Expr, typeInfo *parser.TypeInfo, ts
 	case *ast.SelectorExpr:
 		id, ok := at.X.(*ast.Ident)
 		if !ok {
-			return errors.Errorf("unsupported type")
+			return errors.Errorf("unsupported type: %T", at.X)
 		}
 		shortPkgName := id.Name
 		typeName := at.Sel.Name
@@ -168,13 +179,13 @@ func (p *TypeParser) parseFieldExpr(expr ast.Expr, typeInfo *parser.TypeInfo, ts
 		})
 		allTypes, ok := innerType[[2]string{pkgInfo.AbsPackagePath, shortPkgName}]
 		if !ok {
-			return errors.Errorf("unsupported type")
+			return errors.Errorf("unsupported type: %s", typeName)
 		}
 		foundType, ok := utils.Find(allTypes, func(info innerTypeInfo) bool {
 			return info.typeName == typeName
 		})
 		if !ok {
-			return errors.Errorf("unsupported type")
+			return errors.Errorf("unsupported type: %s", typeName)
 		}
 
 		ts.Kind = foundType.kind
@@ -184,16 +195,26 @@ func (p *TypeParser) parseFieldExpr(expr ast.Expr, typeInfo *parser.TypeInfo, ts
 			PackagePath: pkgInfo.AbsPackagePath,
 		}
 	case *ast.InterfaceType:
-		shortPkgName := ts.Package.PackageName
-		pkgPath := ts.Package.PackagePath
-		allTypes, _ := innerType[[2]string{pkgPath, shortPkgName}]
-		foundType, ok := utils.Find(allTypes, func(info innerTypeInfo) bool {
-			return info.typeName == ts.Name
-		})
-		if !ok {
+		if ts.Package != nil {
+			shortPkgName := ts.Package.PackageName
+			pkgPath := ts.Package.PackagePath
+			allTypes, _ := innerType[[2]string{pkgPath, shortPkgName}]
+			foundType, ok := utils.Find(allTypes, func(info innerTypeInfo) bool {
+				return info.typeName == ts.Name
+			})
+			if !ok {
+				return errors.Errorf("unsupported type: interface")
+			}
+			ts.Kind = foundType.kind
+			break
+		}
+
+		if at.Methods != nil && len(at.Methods.List) > 0 {
 			return errors.Errorf("unsupported type: interface")
 		}
-		ts.Kind = foundType.kind
+		ts.Kind = reflect.Interface
+		ts.Name = "interface{}"
+
 	case *ast.ChanType:
 		return errors.Errorf("unsupported type: chan")
 	case *ast.FuncType:
@@ -201,7 +222,7 @@ func (p *TypeParser) parseFieldExpr(expr ast.Expr, typeInfo *parser.TypeInfo, ts
 	case *ast.MapType:
 		return errors.Errorf("unsupported type: map")
 	default:
-		return errors.Errorf("unsupported type")
+		return errors.Errorf("unsupported type: %T", expr)
 	}
 
 	if err != nil {

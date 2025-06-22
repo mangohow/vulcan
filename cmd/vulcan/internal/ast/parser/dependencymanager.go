@@ -1,14 +1,15 @@
 package parser
 
 import (
+	"go/ast"
+	"go/token"
+	"strings"
+
 	"github.com/mangohow/mangokit/tools/stream"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils"
-	"go/ast"
-	"go/token"
 	"golang.org/x/tools/go/packages"
-	"strings"
 )
 
 // DependencyManager 依赖管理器
@@ -51,7 +52,7 @@ func (m *DependencyManager) GetTypeInfo(filePath, pkg, typeName string) (*TypeIn
 
 	res := m.getTypeInfo(pkg, typeName)
 	if res == nil {
-		return nil, errors.Errorf("can't find type %s's declaration", typeName)
+		return nil, errors.Errorf("type %s is invalid", typeName)
 	}
 
 	return res, nil
