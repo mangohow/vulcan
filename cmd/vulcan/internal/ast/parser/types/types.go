@@ -65,7 +65,7 @@ type FuncDecl struct {
 	Sql                   []SQL                    // SQL体
 	Annotation            string                   // SQL类型 Insert、Delete、Update、Select
 	SelectFields          []string                 // select语句中对应结构体中字段的名称
-	SqlParseResult        *sqlutils.SqlParseResult // 解析出sql中的#{field}
+	SqlParseResult        *sqlutils.SqlParseResult // 解析出sql中的#{Args}
 }
 
 // 是否是基本类型

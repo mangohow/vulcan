@@ -4,17 +4,17 @@ package mapper
 
 //go:generate ${GOPATH}/bin/vulcan gen db
 import (
-	"github.com/jmoiron/sqlx"
+	"database/sql"
 	"github.com/mangohow/vulcan"
 	. "github.com/mangohow/vulcan/annotation"
 	"github.com/mangohow/vulcan/internal/example/model"
 )
 
 type UserMapper struct {
-	db *sqlx.DB
+	db *sql.DB
 }
 
-func NewUserMapper(db *sqlx.DB) *UserMapper {
+func NewUserMapper(db *sql.DB) *UserMapper {
 	return &UserMapper{
 		db: db,
 	}

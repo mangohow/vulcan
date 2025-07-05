@@ -135,6 +135,19 @@ type WhereStmt struct {
 }
 
 func NewWhereStmt(cond Cond) *WhereStmt {
+	switch stmt := cond.(type) {
+	case *IfStmt:
+		stmt.Sql = strings.TrimRight(stmt.Sql, " ")
+	case *IfChainStmt:
+		for _, s := range stmt.Stmts {
+			s.Sql = strings.TrimRight(s.Sql, " ")
+		}
+	case *ChooseStmt:
+		for _, s := range stmt.Whens {
+			s.Sql = strings.TrimRight(s.Sql, " ")
+		}
+		stmt.Otherwise = strings.TrimRight(stmt.Otherwise, " ")
+	}
 	return &WhereStmt{Cond: cond}
 }
 
@@ -144,26 +157,39 @@ type SetStmt struct {
 }
 
 func NewSetStmt(cond Cond) *SetStmt {
+	switch stmt := cond.(type) {
+	case *IfStmt:
+		stmt.Sql = strings.TrimRight(stmt.Sql, " ")
+	case *IfChainStmt:
+		for _, s := range stmt.Stmts {
+			s.Sql = strings.TrimRight(s.Sql, " ")
+		}
+	case *ChooseStmt:
+		for _, s := range stmt.Whens {
+			s.Sql = strings.TrimRight(s.Sql, " ")
+		}
+		stmt.Otherwise = strings.TrimRight(stmt.Otherwise, " ")
+	}
 	return &SetStmt{Cond: cond}
 }
 
 type IfStmt struct {
 	SQL
 	Cond
-	expr  *ast.BinaryExpr
-	sql   string
-	field []string
+	CondExpr *ast.BinaryExpr
+	Sql      string
+	Args     []string
 }
 
 func NewIfStmt(expr *ast.BinaryExpr, sql string) *IfStmt {
 	sql = strings.Trim(sql, "`\"")
 
 	stmt := &IfStmt{
-		expr: expr,
+		CondExpr: expr,
 	}
 	s, args := parseSqlArgs(sql)
-	stmt.sql = s
-	stmt.field = args
+	stmt.Sql = s
+	stmt.Args = args
 
 	return stmt
 }
@@ -174,7 +200,7 @@ func parseSqlArgs(sql string) (string, []string) {
 	matches := re.FindAllStringSubmatch(sql, -1)
 	for _, match := range matches {
 		if len(match) > 1 {
-			args = match
+			args = append(args, match[1])
 		}
 	}
 
@@ -204,35 +230,49 @@ func NewWhenStmt(expr *ast.BinaryExpr, sql string) *WhenStmt {
 type ChooseStmt struct {
 	SQL
 	Cond
-	when      []*WhenStmt
-	otherwise string
+	Whens         []*WhenStmt
+	Otherwise     string
+	OtherwiseArgs []string
 }
 
 func NewChooseStmt(stmt []*WhenStmt, otherwise string) *ChooseStmt {
-	return &ChooseStmt{
-		when:      stmt,
-		otherwise: otherwise,
+	res := &ChooseStmt{
+		Whens: stmt,
 	}
+	if otherwise != "" {
+		res.Otherwise, res.OtherwiseArgs = parseSqlArgs(otherwise)
+
+	}
+
+	return res
 }
 
 type ForeachStmt struct {
 	SQL
 	CollectionName string
-	itemName       string
+	ItemName       string
 	Separator      string
 	Open           string
 	Close          string
 	Sql            string
+
+	ItemType string
+	Args     []string
 }
 
-func NewForeachStmt(collectionName, itemName, separator, open, close, sql string) *ForeachStmt {
+func NewForeachStmt(collectionName, itemName, separator, open, close, sql, itemType string) *ForeachStmt {
+	sql = strings.Trim(sql, "`\"")
+	sq, args := parseSqlArgs(sql)
+	sq = strings.Trim(sq, " ")
 	return &ForeachStmt{
 		CollectionName: strings.Trim(collectionName, "`\""),
-		itemName:       strings.Trim(itemName, "`\""),
+		ItemName:       strings.Trim(itemName, "`\""),
 		Separator:      strings.Trim(separator, "`\""),
 		Open:           strings.Trim(open, "`\""),
 		Close:          strings.Trim(close, "`\""),
-		Sql:            strings.Trim(sql, "`\""),
+		Sql:            sq,
+		ItemType:       itemType, // TODO
+		Args:           args,
 	}
 }
 
@@ -274,23 +314,23 @@ loop:
 			fmt.Fprintf(writer, "[Set Stmt]")
 			cond = v.Cond
 		case *ForeachStmt:
-			fmt.Fprintf(writer, "[Foreach Stmt] %s %s %s %s %s %s\n", v.CollectionName, v.itemName, v.Separator, v.Open, v.Close, v.Sql)
+			fmt.Fprintf(writer, "[Foreach Stmt] %s %s %s %s %s %s\n", v.CollectionName, v.ItemName, v.Separator, v.Open, v.Close, v.Sql)
 		case *ChooseStmt:
 			fmt.Fprintf(writer, "[Choose Stmt] ")
-			for _, w := range v.when {
-				fmt.Fprintf(writer, "When: %s ", w.sql)
+			for _, w := range v.Whens {
+				fmt.Fprintf(writer, "When: %s ", w.Sql)
 			}
-			if v.otherwise != "" {
-				fmt.Fprintf(writer, "Otherwise: %s", v.otherwise)
+			if v.Otherwise != "" {
+				fmt.Fprintf(writer, "Otherwise: %s", v.Otherwise)
 			}
 			fmt.Fprintf(writer, "\n")
 			break loop
 		case *IfStmt:
-			fmt.Fprintf(writer, "[If Stmt] %s\n", v.sql)
+			fmt.Fprintf(writer, "[If Stmt] %s\n", v.Sql)
 		case *IfChainStmt:
 			fmt.Fprintf(writer, "[If Stmt] ")
 			for _, i := range v.Stmts {
-				fmt.Fprintf(writer, "If: %s ", i.sql)
+				fmt.Fprintf(writer, "If: %s ", i.Sql)
 			}
 			fmt.Fprintf(writer, "\n")
 			break loop

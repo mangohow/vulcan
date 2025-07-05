@@ -2,15 +2,15 @@ package vulcan
 
 import "strings"
 
-type SqlBuilder[T any] struct {
+type SqlBuilder struct {
 	b         strings.Builder
 	whereStmt []string
 	setStmt   []string
 	args      []any
 }
 
-func NewSqlBuilderGenerics[T any](initial, whereInitial, setInitial int) *SqlBuilder[T] {
-	r := &SqlBuilder[T]{
+func NewSqlBuilder(initial, whereInitial, setInitial int) *SqlBuilder {
+	r := &SqlBuilder{
 		whereStmt: make([]string, 0, whereInitial),
 		setStmt:   make([]string, 0, setInitial),
 	}
@@ -18,82 +18,69 @@ func NewSqlBuilderGenerics[T any](initial, whereInitial, setInitial int) *SqlBui
 	return r
 }
 
-func NewSqlBuild(initial, whereInitial, setInitial int) *SqlBuilder[struct{}] {
-	return NewSqlBuilderGenerics[struct{}](initial, whereInitial, setInitial)
-}
-
-func (s *SqlBuilder[T]) AppendWhereStmtConditional(cond bool, arg any, sql string) *SqlBuilder[T] {
+func (s *SqlBuilder) AppendWhereStmtConditional(cond bool, sql string, args ...any) *SqlBuilder {
 	if !cond {
 		return s
 	}
 	s.whereStmt = append(s.whereStmt, sql)
-	if arg != nil {
-		s.args = append(s.args, arg)
-	}
+	s.args = append(s.args, args...)
 
 	return s
 }
 
-func (s *SqlBuilder[T]) EndWhereStmt() *SqlBuilder[T] {
+func (s *SqlBuilder) EndWhereStmt() *SqlBuilder {
 	if len(s.whereStmt) == 0 {
 		return s
 	}
 
 	s.b.WriteString("WHERE 1 = 1 ")
 	s.b.WriteString(strings.Join(s.whereStmt, " "))
+	s.b.WriteString(" ")
 
 	return s
 }
 
-func (s *SqlBuilder[T]) AppendSetStmtConditional(cond bool, arg any, sql string) *SqlBuilder[T] {
+func (s *SqlBuilder) AppendSetStmtConditional(cond bool, sql string, args ...any) *SqlBuilder {
 	if !cond {
 		return s
 	}
 	s.setStmt = append(s.setStmt, sql)
-	if arg != nil {
-		s.args = append(s.args, arg)
-	}
+	s.args = append(s.args, args...)
 
 	return s
 }
 
-func (s *SqlBuilder[T]) AppendSetStmt(arg any, sql string) *SqlBuilder[T] {
-	s.setStmt = append(s.setStmt, sql)
-	if arg != nil {
-		s.args = append(s.args, arg)
-	}
-
-	return s
-}
-
-func (s *SqlBuilder[T]) EndSetStmt() *SqlBuilder[T] {
+func (s *SqlBuilder) EndSetStmt() *SqlBuilder {
 	if len(s.setStmt) == 0 {
 		return s
 	}
 
 	s.b.WriteString("SET ")
 	s.b.WriteString(strings.Join(s.setStmt, ", "))
+	s.b.WriteString(" ")
 
 	return s
 }
 
-func (s *SqlBuilder[T]) AppendStmt(sql string, args ...any) *SqlBuilder[T] {
+func (s *SqlBuilder) AppendStmt(sql string, args ...any) *SqlBuilder {
 	s.b.WriteString(sql)
 	s.args = append(s.args, args...)
 	return s
 }
 
-func (s *SqlBuilder[T]) AppendStmtConditional(cond bool, sql string) *SqlBuilder[T] {
+func (s *SqlBuilder) AppendStmtConditional(cond bool, sql string, args ...any) *SqlBuilder {
 	if cond {
 		s.b.WriteString(sql)
+		s.args = append(s.args, args...)
 	}
 
 	return s
 }
 
-func (s *SqlBuilder[T]) AppendLoopStmt(collection []T, sep, open, close string, fn func(T) []any, sql string) *SqlBuilder[T] {
+// 由于go不支持方法泛型
+func AppendLoopStmt[T any](s *SqlBuilder, collection []T, sep, open, close string, fn func(T) []any, sql string) {
 	if len(collection) == 0 {
-		return s
+		return
 	}
 
 	if open != "" {
@@ -104,7 +91,7 @@ func (s *SqlBuilder[T]) AppendLoopStmt(collection []T, sep, open, close string, 
 		args := fn(v)
 		s.args = append(s.args, args...)
 		s.b.WriteString(sql)
-		if i != 0 {
+		if i >= 0 && sep != "" {
 			s.b.WriteString(sep)
 		}
 	}
@@ -112,44 +99,56 @@ func (s *SqlBuilder[T]) AppendLoopStmt(collection []T, sep, open, close string, 
 	if close != "" {
 		s.b.WriteString(close)
 	}
+	s.b.WriteString(" ")
 
-	return s
+	return
 }
 
-func (s *SqlBuilder[T]) appendStmtChoosed(keyWord string, conds []bool, args []any, sqls []string) {
-	for i, cond := range conds {
-		if cond {
-			s.b.WriteString("WHERE ")
-			s.b.WriteString(sqls[i])
-			s.args = append(s.args, args[i])
+type ConditionalSql struct {
+	Cond bool
+	Sql  string
+	Args []any
+}
+
+func NewConditionSql(cond bool, sql string, args ...any) ConditionalSql {
+	return ConditionalSql{Cond: cond, Sql: sql, Args: args}
+}
+
+func (s *SqlBuilder) appendStmtChoosed(keyWord string, conds []ConditionalSql, defaultSql string, args []any) {
+	for i := range conds {
+		if conds[i].Cond {
+			s.b.WriteString(keyWord)
+			s.b.WriteString(conds[i].Sql)
+			s.args = append(s.args, conds[i].Args...)
 			return
 		}
 	}
 
-	if len(conds) == len(args) {
+	if defaultSql == "" {
 		return
 	}
+
 	s.b.WriteString("WHERE ")
-	s.b.WriteString(sqls[len(conds)])
-	s.args = append(s.args, args[len(conds)])
+	s.b.WriteString(defaultSql)
+	s.args = append(s.args, args...)
 }
 
-func (s *SqlBuilder[T]) AppendWhereStmtChoosed(conds []bool, args []any, sqls []string) {
-	s.appendStmtChoosed("WHERE ", conds, args, sqls)
+func (s *SqlBuilder) AppendWhereStmtChoosed(conds []ConditionalSql, defaultSql string, args []any) {
+	s.appendStmtChoosed("WHERE ", conds, defaultSql, args)
 }
 
-func (s *SqlBuilder[T]) AppendSetStmtChoosed(conds []bool, args []any, sqls []string) {
-	s.appendStmtChoosed("SET ", conds, args, sqls)
+func (s *SqlBuilder) AppendSetStmtChoosed(conds []ConditionalSql, defaultSql string, args []any) {
+	s.appendStmtChoosed("SET ", conds, defaultSql, args)
 }
 
-func (s *SqlBuilder[T]) String() string {
+func (s *SqlBuilder) String() string {
 	return s.b.String()
 }
 
-func (s *SqlBuilder[T]) Args() []any {
+func (s *SqlBuilder) Args() []any {
 	return s.args
 }
 
-func MakeSlice[T any](conds ...T) []T {
-	return conds
+func MakeSlice[T any](ss ...T) []T {
+	return ss
 }

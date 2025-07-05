@@ -3,10 +3,13 @@ package dbgenerator
 import (
 	"bytes"
 	"fmt"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/astutils"
 	"go/ast"
 	"go/format"
 	"go/token"
+	"math/bits"
 	"os"
+	"os/exec"
 	"reflect"
 	"strconv"
 	"strings"
@@ -15,7 +18,7 @@ import (
 	"github.com/mangohow/mangokit/tools/collection"
 	"github.com/mangohow/mangokit/tools/stream"
 	"github.com/mangohow/mangokit/tools/strutil"
-	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/astutils"
+
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/log"
@@ -66,6 +69,22 @@ const (
 	sqlPackageName     = "sql"
 	sqlPackagePathName = "database/sql"
 	sqlDBName          = "DB"
+
+	sqlBuilderFuncAppendStmt                   = "AppendStmt"
+	sqlBuilderFuncAppendWhereStmtConditional   = "AppendWhereStmtConditional"
+	sqlBuilderFuncAppendAppendWhereStmtChoosed = "AppendWhereStmtChoosed"
+	sqlBuilderFuncEndWhereStmt                 = "EndWhereStmt"
+	sqlBuilderFuncAppendSetStmtConditional     = "AppendSetStmtConditional"
+	sqlBuilderFuncAppendSetStmtChoosed         = "AppendSetStmtChoosed"
+	sqlBuilderFuncEndSetStmt                   = "EndSetStmt"
+	sqlBuilderFuncAppendStmtConditional        = "AppendStmtConditional"
+	sqlBuilderFuncAppendLoopStmt               = "AppendLoopStmt"
+	sqlBuilderFuncString                       = "String"
+	sqlBuilderFuncArgs                         = "Args"
+
+	funcNameNewSqlBuilder   = "NewSqlBuilder"
+	funcNameNewConditionSql = "NewConditionSql"
+	funcNameMakeSlice       = "MakeSlice"
 )
 
 type FileGenerator struct {
@@ -90,7 +109,17 @@ func (g *FileGenerator) Execute(filename string) error {
 		}
 	}
 
-	return g.generateCode(filename)
+	if err := g.generateCode(filename); err != nil {
+		return err
+	}
+
+	// 格式化代码
+	err := exec.Command("go", "fmt", filename).Run()
+	if err != nil {
+		log.Errorf("run go fmt failed, %v", err)
+	}
+
+	return nil
 }
 
 func (g *FileGenerator) generateAst(decl *types.Declaration) error {
@@ -129,161 +158,28 @@ func (g *FileGenerator) generateFuncBodyAst(decl *types.Declaration) (*ast.Block
 	case types.RawSQL:
 		// 处理静态sql
 		rawSQL := sql.(types.RawSQL)
-		return g.generateStaticSqlFuncBodyAst(decl, rawSQL.Stmt())
+		options, err := preprocessingStaticSqlGen(decl, rawSQL.Stmt())
+		if err != nil {
+			return nil, err
+		}
+		return g.generateStaticSqlFuncBodyAst(decl, options)
 	default:
 		// 处理静态sql
-		return g.generateDynamicSqlFuncBodyAst(decl)
+		options, err := preprocessingStaticSqlGen(decl, "")
+		if err != nil {
+			return nil, err
+		}
+		return g.generateDynamicSqlFuncBodyAst(decl, options)
 	}
 }
 
-func (g *FileGenerator) generateStaticSqlFuncBodyAst(decl *types.Declaration, sql string) (*ast.BlockStmt, error) {
-	options, err := preprocessingStaticSqlGen(decl, sql)
+func (g *FileGenerator) generateStaticSqlFuncBodyAst(decl *types.Declaration, options *sqlGenOptions) (*ast.BlockStmt, error) {
+	body := &ast.BlockStmt{}
+	stmts, err := g.generateCommonCode(decl, options, false)
 	if err != nil {
 		return nil, err
 	}
-	body := &ast.BlockStmt{}
-
-	// 生成option.ExecOption赋值操作
-	// option := &vulcan.ExecOption{
-	//		SqlStmt: "SELECT ...",
-	//		Args:    []any{...},
-	//		Execer:  ...,
-	//	}
-	composite := &ast.CompositeLit{
-		Type: astutils.BuildIdentOrSelectorExpr(corePackageName + "." + "ExecOption"),
-		Elts: []ast.Expr{
-			astutils.BuildKeyValueBasicLitExpr(execOptionFieldSqlStmtName, fmt.Sprintf("%q", options.SQL), token.STRING),
-			astutils.BuildKeyValueExpr(execOptionFieldExecerName, astutils.BuildIdentOrSelectorExpr(options.receiverName+"."+options.receiverDbFieldName)),
-		},
-	}
-
-	// 如果sql参数不为空, 则添加参数
-	if len(options.ParamsName) > 0 {
-		composite.Elts = append(composite.Elts, astutils.BuildKeyValueExpr(execOptionFieldArgsName, &ast.CompositeLit{
-			Type: &ast.ArrayType{
-				Elt: ast.NewIdent("any"),
-			},
-			Elts: stream.Map(options.ParamsName, func(name string) ast.Expr {
-				return astutils.BuildIdentOrSelectorExpr(name)
-			}),
-		}))
-	}
-
-	// 如果有扩展字段则需要传入ExecOption
-	for _, param := range decl.SqlFuncDecl.InputParam {
-		if types.IsRegisteredExtension(param) {
-			composite.Elts = append(composite.Elts, astutils.BuildKeyValueBasicLitExpr(execOptionFieldExtensionName, param.Name, token.STRING))
-		}
-	}
-
-	optionAssign := &ast.AssignStmt{
-		Lhs: []ast.Expr{ast.NewIdent(options.execOptionName)},
-		Rhs: []ast.Expr{astutils.BuildUnaryExpr("&", composite)},
-		Tok: token.DEFINE,
-	}
-	body.List = append(body.List, optionAssign)
-
-	// 构建拦截器preHandle调用语句
-	// vulcan.InvokePreHandler(option, opts...)
-	preInterceptorCall := astutils.BuildSimpleCallAssign(corePackageName+"."+invokePreHandlerName, []*astutils.FuncArg{
-		{Name: options.execOptionName},
-		{Name: g.optsName},
-	}, true)
-	body.List = append(body.List, &ast.ExprStmt{X: preInterceptorCall})
-
-	// 如果是select语句, 则需要new一个对象
-	// res := &pkg.Struct{}
-	if decl.SqlFuncDecl.Annotation == types.SQLSelectFunc {
-		assignStmt := astutils.BuildInitAssignExpr(decl.SqlFuncDecl.FuncReturnResultParam, options.sqlOperationResultName, decl.PkgInfo.PackageName)
-		body.List = append(body.List, assignStmt)
-	}
-
-	var (
-		queryStmt      ast.Stmt
-		selectScanFunc func() []ast.Stmt
-	)
-	// 构建数据库操作语句
-	if decl.SqlFuncDecl.Annotation == types.SQLSelectFunc {
-		returnType := &decl.SqlFuncDecl.FuncReturnResultParam.Type
-		if returnType.IsSlice() {
-			// 处理批量查询
-			// rows, err := option.Select(option.SqlStmt, option.Args...)
-			queryStmt, selectScanFunc = g.generateDBSelectStmt(decl, options)
-		} else {
-			// 处理单条记录的查询
-			// err := option.Get(option.SqlStmt, option.Args...).Scan(&res.Id, ...)
-			queryStmt = g.generateDBGetStmt(decl, options)
-		}
-		body.List = append(body.List, queryStmt)
-	} else {
-		// 处理sql执行语句
-		// result, err := option.Exec(option.SqlStmt, option.Args...)
-		execArgs := make([]*astutils.FuncArg, 0, 3)
-		execArgs = append(execArgs, stream.Map(options.sqlExecuteArgsName, func(v string) *astutils.FuncArg {
-			return &astutils.FuncArg{Name: v}
-		})...)
-		dbCallExpr := astutils.BuildDefineStmtByExpr(astutils.BuildIdentList(options.sqlExecuteResultName...),
-			[]ast.Expr{astutils.BuildSimpleCallAssign(options.execOptionName+"."+options.sqlOperationName, execArgs, true)})
-		body.List = append(body.List, dbCallExpr)
-	}
-
-	// 构建拦截器postHandle调用语句
-	// vulcan.InvokePostHandler(vulcan.NewResultOption(vulcan.SQLTypeUpdate, nil, err, result))
-	postInterceptorCall := astutils.BuildCallExpr(astutils.BuildIdentOrSelectorExpr(corePackageName+"."+invokePostHandlerName), []ast.Expr{
-		astutils.BuildSimpleCallAssign(corePackageName+"."+newResultOptionName, stream.Map(options.newResultOptionArgsName, func(v string) *astutils.FuncArg {
-			return &astutils.FuncArg{Name: v}
-		}), false),
-	}, false)
-	body.List = append(body.List, &ast.ExprStmt{X: postInterceptorCall})
-
-	// 构建err判断语句
-	// if err != nil {
-	//		return err
-	//	}
-	body.List = append(body.List, g.generateReturnErrAst(decl.SqlFuncDecl.FuncReturnResultParam, options.sqlOperationResultName, decl.SqlFuncDecl.Annotation))
-
-	// 如果是查询列表, 则需要生成for循环Scan语句
-	// defer rows.Close()
-	//	for rows.Next() {
-	//		obj := &model.User{}
-	//		rows.Scan(&obj.Id, ...)
-	//		res = append(res, obj)
-	//	}
-	if selectScanFunc != nil {
-		body.List = append(body.List, selectScanFunc()...)
-	}
-
-	// 如果是插入语句, 可能需要给自增Id赋值
-	// id, err := result.LastInsertId()
-	//	if err != nil {
-	//		return 0, err
-	//	}
-	//	user.Id = id
-	if decl.SqlFuncDecl.Annotation == types.SQLInsertFunc {
-		stmts := g.generatePrimaryKeyAssign(options, decl)
-		if len(stmts) > 0 {
-			// 添加空行
-			body.List = append(body.List, astutils.BuildEmptyStmt())
-			body.List = append(body.List, stmts...)
-		}
-	}
-
-	if decl.SqlFuncDecl.FuncReturnResultParam != nil {
-		// 如果是增删改语句, 可能需要返回rowAffected
-		// affected, err := result.RowsAffected()
-		//	if err != nil {
-		//		return 0, err
-		//	}
-		// return int(affected), nil
-		rowsAffectedStmt := g.generateRowAffectedAssignAndReturnStmt(options, decl)
-		body.List = append(body.List, astutils.BuildEmptyStmt())
-		body.List = append(body.List, rowsAffectedStmt...)
-	} else {
-		// 直接构建返回语句
-		// return nil
-		body.List = append(body.List, astutils.BuildEmptyStmt())
-		body.List = append(body.List, astutils.BuildReturnStmt("nil"))
-	}
+	body.List = stmts
 
 	return body, nil
 }
@@ -331,7 +227,7 @@ func (g *FileGenerator) generateReturnErrAst(param *types.Param, sqlExecuteResul
 //	}
 //
 // user.Id = lastInsertedId
-func (g *FileGenerator) generatePrimaryKeyAssign(options *staticSqlGenOptions, decl *types.Declaration) []ast.Stmt {
+func (g *FileGenerator) generatePrimaryKeyAssign(options *sqlGenOptions, decl *types.Declaration) []ast.Stmt {
 	var (
 		findPrimaryKey func(param *types.Param) *types.Param
 		names          []string
@@ -404,7 +300,7 @@ func (g *FileGenerator) generatePrimaryKeyAssign(options *staticSqlGenOptions, d
 	return []ast.Stmt{assignStmt, errReturnStmt, astutils.BuildEmptyStmt(), idAssignStmt}
 }
 
-func (g *FileGenerator) generateRowAffectedAssignAndReturnStmt(options *staticSqlGenOptions, decl *types.Declaration) []ast.Stmt {
+func (g *FileGenerator) generateRowAffectedAssignAndReturnStmt(options *sqlGenOptions, decl *types.Declaration) []ast.Stmt {
 	if decl.SqlFuncDecl.Annotation == types.SQLSelectFunc || decl.SqlFuncDecl.FuncReturnResultParam == nil {
 		return []ast.Stmt{astutils.BuildReturnStmt(options.sqlOperationResultName, "nil")}
 	}
@@ -421,7 +317,7 @@ func (g *FileGenerator) generateRowAffectedAssignAndReturnStmt(options *staticSq
 	return []ast.Stmt{assignStmt, errReturnStmt, astutils.BuildEmptyStmt(), returnStmt}
 }
 
-type staticSqlGenOptions struct {
+type sqlGenOptions struct {
 	*sqlutils.SqlParseResult
 	execOptionName          string
 	receiverName            string
@@ -435,10 +331,11 @@ type staticSqlGenOptions struct {
 	newResultOptionArgsName []string
 	selectRowsName          string
 	selectObjName           string
+	builderName             string
 }
 
 // 对静态sql的代码生成进行预处理
-func preprocessingStaticSqlGen(decl *types.Declaration, sql string) (*staticSqlGenOptions, error) {
+func preprocessingStaticSqlGen(decl *types.Declaration, sql string) (*sqlGenOptions, error) {
 	usedNames := collection.NewSetFromSlice[string](utils.Keys(decl.SqlFuncDecl.InputParam))
 	if decl.SqlFuncDecl.Receiver != nil {
 		usedNames.Add(decl.SqlFuncDecl.Receiver.Name)
@@ -449,13 +346,16 @@ func preprocessingStaticSqlGen(decl *types.Declaration, sql string) (*staticSqlG
 		}
 	}
 
-	sqlInfo := decl.SqlFuncDecl.SqlParseResult
-	sqlInfo.SQL = sql
+	var sqlInfo *sqlutils.SqlParseResult
+	if decl.SqlFuncDecl.SqlParseResult != nil {
+		sqlInfo = decl.SqlFuncDecl.SqlParseResult
+		sqlInfo.SQL = sql
+	}
 
 	var (
 		sqlOperationName     = dbExecOptName
 		sqlExecuteResultName = []string{getAvailableName("result", usedNames), "err"}
-		options              = &staticSqlGenOptions{
+		options              = &sqlGenOptions{
 			execOptionName:         getAvailableName("option", usedNames),
 			receiverName:           decl.SqlFuncDecl.Receiver.Name,
 			receiverDbFieldName:    getReceiverDbFieldName(decl.SqlFuncDecl.Receiver),
@@ -465,6 +365,7 @@ func preprocessingStaticSqlGen(decl *types.Declaration, sql string) (*staticSqlG
 			rowsAffectedName:       getAvailableName("rowsAffected", usedNames),
 			selectRowsName:         getAvailableName("rows", usedNames),
 			selectObjName:          getAvailableName("obj", usedNames),
+			builderName:            getAvailableName("builder", usedNames),
 		}
 	)
 
@@ -526,7 +427,7 @@ func getReceiverDbFieldName(param *types.Param) string {
 	return ""
 }
 
-func (g *FileGenerator) generateDynamicSqlFuncBodyAst(decl *types.Declaration) (*ast.BlockStmt, error) {
+func (g *FileGenerator) generateDynamicSqlFuncBodyAst(decl *types.Declaration, options *sqlGenOptions) (*ast.BlockStmt, error) {
 	blockStmt := &ast.BlockStmt{}
 
 	var (
@@ -534,7 +435,7 @@ func (g *FileGenerator) generateDynamicSqlFuncBodyAst(decl *types.Declaration) (
 		builderAssignExpr        *ast.AssignStmt
 		genericsName             = ""
 		genericsStar             = false
-		builderVarName           = "builder" // TODO builder可能不可用
+		builderVarName           = options.builderName
 	)
 	if stmt := g.findForeachStmt(decl.SqlFuncDecl.Sql); stmt != nil {
 		param := decl.SqlFuncDecl.InputParam[stmt.CollectionName]
@@ -555,59 +456,372 @@ func (g *FileGenerator) generateDynamicSqlFuncBodyAst(decl *types.Declaration) (
 		}
 	}
 
-	builderAssignExpr = astutils.BuildCallAssignGenerics([]string{builderVarName}, ":=", "vulcan.NewSqlBuilderGenerics", []*astutils.FuncArg{
-		{Name: strconv.Itoa(128), BasicLitFlag: token.INT},
+	var (
+		dynamicSqlAstList = []ast.Stmt{}
+		totalSqlLen       int
+	)
+
+	// 生成动态sql代码Ast
+	for _, sql := range decl.SqlFuncDecl.Sql {
+		var (
+			astStmts []ast.Stmt
+			sqlLen   int
+		)
+		switch stmt := sql.(type) {
+		case *types.WhereStmt:
+			astStmts, sqlLen = g.generateWhereStmtAst(stmt, builderVarName)
+		case *types.SetStmt:
+			astStmts, sqlLen = g.generateSetStmtAst(stmt, builderVarName)
+		case *types.IfStmt:
+			astStmts, sqlLen = g.generateIfStmtAst(stmt, builderVarName)
+		case *types.ForeachStmt:
+			astStmts, sqlLen = g.generateForeachStmtAst(stmt, builderVarName)
+		case *types.SimpleStmt:
+			astStmts, sqlLen = g.generateSimpleStmtAst(stmt, builderVarName)
+		case *types.EmptySQLImpl: // 什么也不做
+		default:
+			return nil, errors.Errorf("unknown annotaion type: %T", sql)
+		}
+		totalSqlLen += sqlLen
+		dynamicSqlAstList = append(dynamicSqlAstList, astStmts...)
+	}
+	builderAssignExpr = astutils.BuildCallAssignGenerics([]string{builderVarName}, ":=", corePackageName+"."+funcNameNewSqlBuilder, []*astutils.FuncArg{
+		{Name: strconv.Itoa(roundUp(totalSqlLen)), BasicLitFlag: token.INT},
 		{Name: strconv.Itoa(whereInitial), BasicLitFlag: token.INT},
 		{Name: strconv.Itoa(setInitial), BasicLitFlag: token.INT},
 	}, genericsName, genericsStar, false)
 	blockStmt.List = append(blockStmt.List, builderAssignExpr)
+	blockStmt.List = append(blockStmt.List, dynamicSqlAstList...)
 
-	// 生成动态sql代码Ast
-	for _, sql := range decl.SqlFuncDecl.Sql {
-		var added ast.Stmt
-		switch stmt := sql.(type) {
-		case *types.WhereStmt:
-			added = g.generateWhereStmtAst(stmt, builderVarName)
-		case *types.SetStmt:
-			added = g.generateSetStmtAst(stmt, builderVarName)
-		case *types.IfStmt:
-			added = g.generateIfStmtAst(stmt, builderVarName)
-		case *types.ForeachStmt:
-			added = g.generateForeachStmtAst(stmt, builderVarName)
-		case *types.SimpleStmt:
-			added = g.generateSimpleStmtAst(stmt, builderVarName)
-		default:
-			return nil, errors.Errorf("unknown annotaion type: %T", sql)
-		}
-		blockStmt.List = append(blockStmt.List, added)
+	commonStmts, err := g.generateCommonCode(decl, options, true)
+	if err != nil {
+		return nil, err
 	}
+	blockStmt.List = append(blockStmt.List, commonStmts...)
 
 	return blockStmt, nil
 }
 
-func (g *FileGenerator) generateWhereStmtAst(stmt *types.WhereStmt, builderVarName string) ast.Stmt {
+// 生成静态sql和动态sql公共部分
+func (g *FileGenerator) generateCommonCode(decl *types.Declaration, options *sqlGenOptions, isDynamic bool) ([]ast.Stmt, error) {
+	resList := make([]ast.Stmt, 0, 16)
+	// 生成option.ExecOption赋值操作
+	// option := &vulcan.ExecOption{
+	//		SqlStmt: "SELECT ...",
+	//		Args:    []any{...},
+	//		Execer:  ...,
+	//	}
+	composite := &ast.CompositeLit{
+		Type: astutils.BuildIdentOrSelectorExpr(corePackageName + "." + "ExecOption"),
+	}
 
-	return nil
+	if isDynamic {
+		composite.Elts = []ast.Expr{
+			astutils.BuildKeyValueExpr(execOptionFieldSqlStmtName, astutils.BuildSimpleCall(ast.NewIdent(options.builderName), ast.NewIdent(sqlBuilderFuncString))),
+		}
+	} else {
+		composite.Elts = []ast.Expr{
+			astutils.BuildKeyValueBasicLitExpr(execOptionFieldSqlStmtName, fmt.Sprintf("%q", options.SQL), token.STRING),
+		}
+	}
+
+	if isDynamic {
+		composite.Elts = append(composite.Elts, astutils.BuildKeyValueExpr(execOptionFieldArgsName, astutils.BuildSimpleCall(ast.NewIdent(options.builderName), ast.NewIdent(sqlBuilderFuncArgs))))
+	} else {
+		// 如果sql参数不为空, 则添加参数
+		if len(options.ParamsName) > 0 {
+			composite.Elts = append(composite.Elts, astutils.BuildKeyValueExpr(execOptionFieldArgsName, &ast.CompositeLit{
+				Type: &ast.ArrayType{
+					Elt: ast.NewIdent("any"),
+				},
+				Elts: stream.Map(options.ParamsName, func(name string) ast.Expr {
+					return astutils.BuildIdentOrSelectorExpr(name)
+				}),
+			}))
+		}
+	}
+	composite.Elts = append(composite.Elts, astutils.BuildKeyValueExpr(execOptionFieldExecerName, astutils.BuildIdentOrSelectorExpr(options.receiverName+"."+options.receiverDbFieldName)))
+
+	// 如果有扩展字段则需要传入ExecOption
+	for _, param := range decl.SqlFuncDecl.InputParam {
+		if types.IsRegisteredExtension(param) {
+			composite.Elts = append(composite.Elts, astutils.BuildKeyValueBasicLitExpr(execOptionFieldExtensionName, param.Name, token.STRING))
+		}
+	}
+
+	optionAssign := &ast.AssignStmt{
+		Lhs: []ast.Expr{ast.NewIdent(options.execOptionName)},
+		Rhs: []ast.Expr{astutils.BuildUnaryExpr("&", composite)},
+		Tok: token.DEFINE,
+	}
+	resList = append(resList, optionAssign)
+
+	// 构建拦截器preHandle调用语句
+	// vulcan.InvokePreHandler(option, opts...)
+	preInterceptorCall := astutils.BuildSimpleCallAssign(corePackageName+"."+invokePreHandlerName, []*astutils.FuncArg{
+		{Name: options.execOptionName},
+		{Name: g.optsName},
+	}, true)
+	resList = append(resList, &ast.ExprStmt{X: preInterceptorCall})
+
+	// 如果是select语句, 则需要new一个对象
+	// res := &pkg.Struct{}
+	if decl.SqlFuncDecl.Annotation == types.SQLSelectFunc {
+		assignStmt := astutils.BuildInitAssignExpr(decl.SqlFuncDecl.FuncReturnResultParam, options.sqlOperationResultName, decl.PkgInfo.PackageName)
+		resList = append(resList, assignStmt)
+	}
+
+	var (
+		queryStmt      ast.Stmt
+		selectScanFunc func() []ast.Stmt
+	)
+	// 构建数据库操作语句
+	if decl.SqlFuncDecl.Annotation == types.SQLSelectFunc {
+		returnType := &decl.SqlFuncDecl.FuncReturnResultParam.Type
+		if returnType.IsSlice() {
+			// 处理批量查询
+			// rows, err := option.Select(option.SqlStmt, option.Args...)
+			queryStmt, selectScanFunc = g.generateDBSelectStmt(decl, options)
+		} else {
+			// 处理单条记录的查询
+			// err := option.Get(option.SqlStmt, option.Args...).Scan(&res.Id, ...)
+			queryStmt = g.generateDBGetStmt(decl, options)
+		}
+		resList = append(resList, queryStmt)
+	} else {
+		// 处理sql执行语句
+		// result, err := option.Exec(option.SqlStmt, option.Args...)
+		execArgs := make([]*astutils.FuncArg, 0, 3)
+		execArgs = append(execArgs, stream.Map(options.sqlExecuteArgsName, func(v string) *astutils.FuncArg {
+			return &astutils.FuncArg{Name: v}
+		})...)
+		dbCallExpr := astutils.BuildDefineStmtByExpr(astutils.BuildIdentList(options.sqlExecuteResultName...),
+			[]ast.Expr{astutils.BuildSimpleCallAssign(options.execOptionName+"."+options.sqlOperationName, execArgs, true)})
+		resList = append(resList, dbCallExpr)
+	}
+
+	// 构建拦截器postHandle调用语句
+	// vulcan.InvokePostHandler(vulcan.NewResultOption(vulcan.SQLTypeUpdate, nil, err, result))
+	postInterceptorCall := astutils.BuildCallExpr(astutils.BuildIdentOrSelectorExpr(corePackageName+"."+invokePostHandlerName), []ast.Expr{
+		astutils.BuildSimpleCallAssign(corePackageName+"."+newResultOptionName, stream.Map(options.newResultOptionArgsName, func(v string) *astutils.FuncArg {
+			return &astutils.FuncArg{Name: v}
+		}), false),
+	}, false)
+	resList = append(resList, &ast.ExprStmt{X: postInterceptorCall})
+
+	// 构建err判断语句
+	// if err != nil {
+	//		return err
+	//	}
+	resList = append(resList, g.generateReturnErrAst(decl.SqlFuncDecl.FuncReturnResultParam, options.sqlOperationResultName, decl.SqlFuncDecl.Annotation))
+
+	// 如果是查询列表, 则需要生成for循环Scan语句
+	// defer rows.Close()
+	//	for rows.Next() {
+	//		obj := &model.User{}
+	//		rows.Scan(&obj.Id, ...)
+	//		res = append(res, obj)
+	//	}
+	if selectScanFunc != nil {
+		resList = append(resList, selectScanFunc()...)
+	}
+
+	// 如果是插入语句, 可能需要给自增Id赋值
+	// id, err := result.LastInsertId()
+	//	if err != nil {
+	//		return 0, err
+	//	}
+	//	user.Id = id
+	if decl.SqlFuncDecl.Annotation == types.SQLInsertFunc {
+		stmts := g.generatePrimaryKeyAssign(options, decl)
+		if len(stmts) > 0 {
+			// 添加空行
+			resList = append(resList, astutils.BuildEmptyStmt())
+			resList = append(resList, stmts...)
+		}
+	}
+
+	if decl.SqlFuncDecl.FuncReturnResultParam != nil {
+		// 如果是增删改语句, 可能需要返回rowAffected
+		// affected, err := result.RowsAffected()
+		//	if err != nil {
+		//		return 0, err
+		//	}
+		// return int(affected), nil
+		rowsAffectedStmt := g.generateRowAffectedAssignAndReturnStmt(options, decl)
+		resList = append(resList, astutils.BuildEmptyStmt())
+		resList = append(resList, rowsAffectedStmt...)
+	} else {
+		// 直接构建返回语句
+		// return nil
+		resList = append(resList, astutils.BuildEmptyStmt())
+		resList = append(resList, astutils.BuildReturnStmt("nil"))
+	}
+
+	return resList, nil
 }
 
-func (g *FileGenerator) generateSetStmtAst(stmt *types.SetStmt, builderVarName string) ast.Stmt {
-
-	return nil
+func (g *FileGenerator) generateWhereStmtAst(stmt *types.WhereStmt, builderVarName string) (astStmts []ast.Stmt, sqlLen int) {
+	switch cond := stmt.Cond.(type) {
+	case *types.IfStmt:
+		return g.generateIfStmtAstHelper([]*types.IfStmt{cond}, builderVarName, sqlBuilderFuncAppendWhereStmtConditional, sqlBuilderFuncEndWhereStmt)
+	case *types.IfChainStmt:
+		return g.generateIfStmtAstHelper(cond.Stmts, builderVarName, sqlBuilderFuncAppendWhereStmtConditional, sqlBuilderFuncEndWhereStmt)
+	case *types.ChooseStmt:
+		return g.generateChooseStmtAstHelper(cond.Whens, cond.Otherwise, cond.OtherwiseArgs, builderVarName, sqlBuilderFuncAppendAppendWhereStmtChoosed)
+	}
+	return
 }
 
-func (g *FileGenerator) generateIfStmtAst(stmt *types.IfStmt, builderVarName string) ast.Stmt {
+func (g *FileGenerator) generateIfStmtAstHelper(stmts []*types.IfStmt, builderVarName, appendFuncName, endFuncName string) (astStmts []ast.Stmt, sqlLen int) {
+	var (
+		x     ast.Expr = ast.NewIdent(builderVarName)
+		inner *ast.CallExpr
+	)
+	for i := 0; i < len(stmts); i++ {
+		stmt := stmts[i]
+		sqlLen += len(stmt.Sql)
+		inner = &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   x,
+				Sel: ast.NewIdent(appendFuncName),
+			},
+			Args: []ast.Expr{
+				stmt.CondExpr,
+			},
+		}
 
-	return nil
+		inner.Args = append(inner.Args, astutils.BuildBasicLit(token.STRING, fmt.Sprintf("%q", stmt.Sql)))
+		inner.Args = append(inner.Args, astutils.BuildIdentOrSelectorExprList(stmt.Args)...)
+		x = inner
+	}
+	astStmts = []ast.Stmt{&ast.ExprStmt{X: astutils.BuildSimpleCall(x, ast.NewIdent(endFuncName))}}
+	return
 }
 
-func (g *FileGenerator) generateForeachStmtAst(stmt *types.ForeachStmt, builderVarName string) ast.Stmt {
+func (g *FileGenerator) generateChooseStmtAstHelper(whens []*types.WhenStmt, otherwise string, otherwiseArgs []string, builderVarName, appendFuncName string) (astStmts []ast.Stmt, sqlLen int) {
+	condSqls := make([]ast.Expr, 0, len(whens))
+	sqlLen = len(otherwise)
+	for _, when := range whens {
+		sqlLen = max(sqlLen, len(when.Sql))
+		callArgs := []ast.Expr{
+			when.CondExpr,
+			astutils.BuildBasicLit(token.STRING, fmt.Sprintf("%q", when.Sql)),
+		}
+		condSqls = append(condSqls, astutils.BuildCallExpr(astutils.BuildIdentOrSelectorExpr(corePackageName+"."+funcNameNewConditionSql), callArgs, false))
+		callArgs = append(callArgs, astutils.BuildIdentOrSelectorExprList(when.Args)...)
+	}
+	arg1 := astutils.BuildCallExpr(astutils.BuildIdentOrSelectorExpr(corePackageName+"."+funcNameMakeSlice), condSqls, false)
+	arg2 := astutils.BuildBasicLit(token.STRING, fmt.Sprintf("%q", otherwise))
+	args := []ast.Expr{arg1, arg2}
+	if len(otherwiseArgs) == 0 {
+		args = append(args, ast.NewIdent("nil"))
+	} else {
+		args = append(args, astutils.BuildIdentOrSelectorExprList(otherwiseArgs)...)
+	}
 
-	return nil
+	astStmts = []ast.Stmt{
+		&ast.ExprStmt{
+			X: astutils.BuildCallExpr(astutils.BuildIdentOrSelectorExpr(builderVarName+"."+appendFuncName), args, false),
+		},
+	}
+
+	return
 }
 
-func (g *FileGenerator) generateSimpleStmtAst(stmt *types.SimpleStmt, builderVarName string) ast.Stmt {
+func (g *FileGenerator) generateSetStmtAst(stmt *types.SetStmt, builderVarName string) (astStmts []ast.Stmt, sqlLen int) {
+	switch cond := stmt.Cond.(type) {
+	case *types.IfStmt:
+		return g.generateIfStmtAstHelper([]*types.IfStmt{cond}, builderVarName, sqlBuilderFuncAppendSetStmtConditional, sqlBuilderFuncEndSetStmt)
+	case *types.IfChainStmt:
+		return g.generateIfStmtAstHelper(cond.Stmts, builderVarName, sqlBuilderFuncAppendSetStmtConditional, sqlBuilderFuncEndSetStmt)
+	case *types.ChooseStmt:
+		return g.generateChooseStmtAstHelper(cond.Whens, cond.Otherwise, cond.OtherwiseArgs, builderVarName, sqlBuilderFuncAppendSetStmtChoosed)
+	}
+	return
+}
 
-	return nil
+func (g *FileGenerator) generateIfStmtAst(stmt *types.IfStmt, builderVarName string) (astStmts []ast.Stmt, sqlLen int) {
+	funcArgs := []ast.Expr{
+		stmt.CondExpr,
+		astutils.BuildBasicLit(token.STRING, fmt.Sprintf("%q", stmt.Sql)),
+	}
+	funcArgs = append(funcArgs, astutils.BuildIdentOrSelectorExprList(stmt.Args)...)
+	astStmts = append(astStmts, &ast.ExprStmt{
+		X: astutils.BuildCallExpr(astutils.BuildIdentOrSelectorExpr(builderVarName+"."+sqlBuilderFuncAppendStmtConditional), funcArgs, false),
+	})
+	sqlLen = len(stmt.Sql)
+	return
+	return
+}
+
+func (g *FileGenerator) generateForeachStmtAst(stmt *types.ForeachStmt, builderVarName string) (astStmts []ast.Stmt, sqlLen int) {
+	funcArgs := make([]ast.Expr, 0, 6)
+	funcArgs = append(funcArgs, ast.NewIdent(builderVarName))
+	funcArgs = append(funcArgs, ast.NewIdent(stmt.CollectionName))
+	funcArgs = append(funcArgs, astutils.BuildBasicLit(token.STRING, fmt.Sprintf("%q", stmt.Separator)))
+	funcArgs = append(funcArgs, astutils.BuildBasicLit(token.STRING, fmt.Sprintf("%q", stmt.Open)))
+	funcArgs = append(funcArgs, astutils.BuildBasicLit(token.STRING, fmt.Sprintf("%q", stmt.Close)))
+	var typeExpr ast.Expr
+	if strings.HasSuffix(stmt.ItemType, "*") {
+		itemType := strings.TrimLeft(stmt.ItemType, "*")
+		typeExpr = &ast.StarExpr{
+			X: astutils.BuildIdentOrSelectorExpr(itemType),
+		}
+	} else {
+		typeExpr = astutils.BuildIdentOrSelectorExpr(stmt.ItemType)
+	}
+	returnStmt := &ast.ReturnStmt{
+		Results: []ast.Expr{
+			&ast.CompositeLit{
+				Type: &ast.ArrayType{
+					Elt: ast.NewIdent("any"),
+				},
+				Elts: astutils.BuildIdentOrSelectorExprList(stmt.Args),
+			},
+		},
+	}
+	funcArgs = append(funcArgs, &ast.FuncLit{
+		Type: &ast.FuncType{
+			Params: &ast.FieldList{
+				List: []*ast.Field{
+					{
+						Names: []*ast.Ident{
+							ast.NewIdent(stmt.ItemName),
+						},
+						Type: typeExpr,
+					},
+				},
+			},
+			Results: &ast.FieldList{
+				List: []*ast.Field{
+					{
+						Type: &ast.ArrayType{
+							Elt: ast.NewIdent("any"),
+						},
+					},
+				},
+			},
+		},
+		Body: &ast.BlockStmt{
+			List: []ast.Stmt{
+				returnStmt,
+			},
+		},
+	})
+	funcArgs = append(funcArgs, astutils.BuildBasicLit(token.STRING, fmt.Sprintf("%q", stmt.Sql)))
+	astStmts = []ast.Stmt{&ast.ExprStmt{X: astutils.BuildCallExpr(astutils.BuildIdentOrSelectorExpr(corePackageName+"."+sqlBuilderFuncAppendLoopStmt), funcArgs, false)}}
+	return
+}
+
+func (g *FileGenerator) generateSimpleStmtAst(stmt *types.SimpleStmt, builderVarName string) (astStmts []ast.Stmt, sqlLen int) {
+	funcArgs := []ast.Expr{astutils.BuildBasicLit(token.STRING, fmt.Sprintf("%q", stmt.Sql))}
+	funcArgs = append(funcArgs, astutils.BuildIdentOrSelectorExprList(stmt.Args)...)
+	astStmts = append(astStmts, &ast.ExprStmt{
+		X: astutils.BuildCallExpr(astutils.BuildIdentOrSelectorExpr(builderVarName+"."+sqlBuilderFuncAppendStmt), funcArgs, false),
+	})
+	sqlLen = len(stmt.Sql)
+	return
 }
 
 func (g *FileGenerator) findForeachStmt(sqls []types.SQL) *types.ForeachStmt {
@@ -627,18 +841,20 @@ func (g *FileGenerator) statisticsInitialCapacity(sqls []types.SQL) (int, int) {
 
 	for _, sql := range sqls {
 		switch stmt := sql.(type) {
-		case types.WhereStmt:
-			ifChainStmt, ok := stmt.Cond.(*types.IfChainStmt)
-			if !ok {
-				break
+		case *types.WhereStmt:
+			switch ifChainStmt := stmt.Cond.(type) {
+			case *types.IfStmt:
+				whereInitial++
+			case *types.IfChainStmt:
+				whereInitial += len(ifChainStmt.Stmts)
 			}
-			whereInitial += len(ifChainStmt.Stmts)
-		case types.SetStmt:
-			ifChainStmt, ok := stmt.Cond.(*types.IfChainStmt)
-			if !ok {
-				break
+		case *types.SetStmt:
+			switch ifChainStmt := stmt.Cond.(type) {
+			case *types.IfStmt:
+				setInitial++
+			case *types.IfChainStmt:
+				setInitial += len(ifChainStmt.Stmts)
 			}
-			setInitial += len(ifChainStmt.Stmts)
 		}
 	}
 
@@ -659,8 +875,10 @@ func (g *FileGenerator) getOptsName(optsName string, inputParm map[string]*types
 
 func (g *FileGenerator) generateCode(filename string) error {
 	astFile := &ast.File{
-		Name:    g.srcFile.AstFile.Name,
-		Imports: g.srcFile.PkgInfo.AstImports,
+		Name:     g.srcFile.AstFile.Name,
+		Imports:  g.srcFile.PkgInfo.AstImports,
+		Doc:      g.srcFile.AstFile.Doc,
+		Comments: g.srcFile.AstFile.Comments,
 	}
 	importGenDecl := &ast.GenDecl{
 		Tok: token.IMPORT,
@@ -711,24 +929,59 @@ func (g *FileGenerator) generateCode(filename string) error {
 		return t.AstDecl
 	})...)
 
-	buffer := bytes.NewBuffer(nil)
-	err := format.Node(buffer, token.NewFileSet(), astFile)
-	if err != nil {
-		return errors.Errorf("generate source code error: %v", err)
+	srcBuf := bytes.NewBuffer(nil)
+	srcBuf.Grow(8 << 10)
+	// 写入doc
+	if astFile.Doc != nil && len(astFile.Doc.List) > 0 {
+		for _, doc := range astFile.Doc.List {
+			srcBuf.WriteString(doc.Text)
+			srcBuf.WriteString("\n")
+		}
 	}
 
-	source := buffer.String()
+	// 写入package
+	srcBuf.WriteString("package " + astFile.Name.Name + "\n\n")
+	tempFst := token.NewFileSet()
+	for _, d := range astFile.Decls {
+		buf := bytes.NewBuffer(nil)
+		buf.Grow(1024)
+		// 处理注释
+		var commentGroup *ast.CommentGroup
+		switch decl := d.(type) {
+		case *ast.FuncDecl:
+			commentGroup = decl.Doc
+			decl.Doc = nil
+		case *ast.GenDecl:
+			commentGroup = decl.Doc
+			decl.Doc = nil
+		}
+
+		if commentGroup != nil && len(commentGroup.List) >= 0 {
+			for _, comment := range commentGroup.List {
+				buf.WriteString(comment.Text)
+				buf.WriteString("\n")
+			}
+		}
+
+		if err := format.Node(buf, tempFst, d); err != nil {
+			return err
+		}
+		srcBuf.WriteString(g.formatFuncSource(buf.String()))
+		srcBuf.WriteString("\n\n")
+	}
+
+	source := srcBuf.String()
 	// 替换空行
 	source = trimEmptyLineSign(source)
 
 	// 在所有类型声明和函数声明前面加一个空行
-	r := strings.NewReplacer([]string{
-		"\nfunc", "\n\nfunc",
-		"\ntype ", "\ntype ",
-	}...)
-	source = r.Replace(source)
-	// 控制声明块之间只有一个空行
-	source = strings.ReplaceAll(source, "\n\n\n", "\n\n")
+	//r := strings.NewReplacer([]string{
+	//	"\nfunc", "\n\nfunc",
+	//	"\ntype ", "\ntype ",
+	//}...)
+	//source = r.Replace(source)
+	//// 控制声明块之间只有一个空行
+	//source = strings.ReplaceAll(source, "\n\n\n", "\n\n")
 
 	// 所有的结构体初始化, key:val添加换行
 	const startKey = "vulcan.ExecOption{SqlStmt"
@@ -775,7 +1028,16 @@ func (g *FileGenerator) generateCode(filename string) error {
 	return nil
 }
 
-func (g *FileGenerator) generateDBSelectStmt(decl *types.Declaration, options *staticSqlGenOptions) (ast.Stmt, func() []ast.Stmt) {
+func (g *FileGenerator) formatFuncSource(source string) string {
+	replacer := strings.NewReplacer(
+		").AppendWhereStmtConditional", ").\n\t\tAppendWhereStmtConditional",
+		").AppendSetStmtConditional", ").\n\t\tAppendSetStmtConditional",
+		"vulcan.NewConditionSql", "\n\t\tvulcan.NewConditionSql",
+	)
+	return replacer.Replace(source)
+}
+
+func (g *FileGenerator) generateDBSelectStmt(decl *types.Declaration, options *sqlGenOptions) (ast.Stmt, func() []ast.Stmt) {
 	// 构建Select查询语句
 	selectStmt := astutils.BuildCallAssign([]string{options.selectRowsName, "err"}, ":=", options.execOptionName+"."+dbSelectOptName, []*astutils.FuncArg{
 		{
@@ -827,7 +1089,7 @@ func (g *FileGenerator) generateDBSelectStmt(decl *types.Declaration, options *s
 	}
 }
 
-func (g *FileGenerator) generateDBGetStmt(decl *types.Declaration, options *staticSqlGenOptions) ast.Stmt {
+func (g *FileGenerator) generateDBGetStmt(decl *types.Declaration, options *sqlGenOptions) ast.Stmt {
 	// 构建option.Get(arg1, arg2).Scan(arg3, arg4, ...)语句
 	// 先构建option.Get()
 	getExpr := astutils.BuildCallExpr(astutils.BuildSelectorExpr([]string{options.execOptionName, dbGetOptName}), []ast.Expr{
@@ -857,4 +1119,11 @@ func (g *FileGenerator) generateDBGetStmt(decl *types.Declaration, options *stat
 
 func trimEmptyLineSign(source string) string {
 	return strings.ReplaceAll(source, astutils.EmptyLineSign, "")
+}
+
+func roundUp(n int) int {
+	if n <= 0 {
+		return 1
+	}
+	return 1 << bits.Len(uint(n-1))
 }

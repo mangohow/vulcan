@@ -33,7 +33,7 @@ type Page interface {
 	TotalPages() int
 	SetTotalCount(int)
 	SetTotalPages(int)
-	IsSelectCount() bool
+	IsSelectCount() bool // 是否查询count
 	Orders() OrderItems
 }
 

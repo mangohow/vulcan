@@ -5,11 +5,13 @@ import (
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
 	"go/ast"
 	"go/token"
+	"strings"
 )
 
 type sqlCall struct {
-	funcName string
-	args     []ast.Expr
+	funcName  string
+	basicInfo *types.FuncDecl
+	args      []ast.Expr
 }
 
 type SQLParserFunc func(call *sqlCall) (types.SQL, error)
@@ -64,10 +66,44 @@ var (
 				if !ok || v.Kind != token.STRING {
 					return nil, errors.Errorf("operate Foreach error, parameter %d invalid", i)
 				}
-				args = append(args, v.Value)
+				args = append(args, strings.Trim(v.Value, `"`))
+			}
+			if args[0] == "" {
+				return nil, errors.Errorf("collect name must not be empty")
+			}
+			if args[1] == "" {
+				return nil, errors.Errorf("item name must not be empty")
+			}
+			if args[5] == "" {
+				return nil, errors.Errorf("sql must not be empty")
+			}
+			collectionName := args[0]
+			if call.basicInfo.InputParam == nil {
+				return nil, errors.Errorf("func %s has no input parameter named %s", call.funcName, collectionName)
 			}
 
-			return types.NewForeachStmt(args[0], args[1], args[2], args[3], args[4], args[5]), nil
+			// 从函数入参中寻找collectionName的类型
+			param, ok := call.basicInfo.InputParam[collectionName]
+			if !ok {
+				return nil, errors.Errorf("func %s has no input parameter named %s", call.funcName, collectionName)
+			}
+
+			if !param.Type.IsSlice() {
+				return nil, errors.Errorf("param %s is not a slice", collectionName)
+			}
+
+			itemTypeName := ""
+			valueType := param.Type.ValueType
+			if valueType.IsPointer() {
+				itemTypeName += "*"
+				valueType = valueType.GetValueType()
+			}
+			if valueType.Package != nil && valueType.Package.PackageName != "" {
+				itemTypeName = itemTypeName + valueType.Package.PackageName + "."
+			}
+			itemTypeName += valueType.Name
+
+			return types.NewForeachStmt(args[0], args[1], args[2], args[3], args[4], args[5], itemTypeName), nil
 		},
 		types.SQLOperateFuncBuild: func(call *sqlCall) (types.SQL, error) {
 			return types.NewEmptySQL(), nil

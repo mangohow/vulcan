@@ -12,15 +12,19 @@ type ExecInterceptor interface {
 
 type FuncInterceptor struct {
 	PreHandlerFn  func(*ExecOption)
-	PostHandlerFn func(option *ResultOption)
+	PostHandlerFn func(*ResultOption)
 }
 
 func (f FuncInterceptor) PreHandle(option *ExecOption) {
-	f.PreHandlerFn(option)
+	if f.PreHandlerFn != nil {
+		f.PreHandlerFn(option)
+	}
 }
 
 func (f FuncInterceptor) PostHandle(option *ResultOption) {
-	f.PostHandlerFn(option)
+	if f.PostHandlerFn != nil {
+		f.PostHandlerFn(option)
+	}
 }
 
 var (
@@ -31,13 +35,13 @@ var (
 
 func getInterceptors() []ExecInterceptor {
 	interceptors := make([]ExecInterceptor, 0, len(executeInterceptors)+2)
-	interceptors = append([]ExecInterceptor{}, executeInterceptors...)
 	if paginationInterceptor != nil {
 		interceptors = append(interceptors, paginationInterceptor)
 	}
 	if sqlDebugInterceptor != nil {
 		interceptors = append(interceptors, sqlDebugInterceptor)
 	}
+	interceptors = append(interceptors, executeInterceptors...)
 
 	return interceptors
 }
@@ -75,8 +79,15 @@ type DebugLogger interface {
 func SetupSqlDebugInterceptor(logger DebugLogger) {
 	sqlDebugInterceptor = FuncInterceptor{
 		PreHandlerFn: func(option *ExecOption) {
-			logger.Debug("SQL ==> %s", option.SqlStmt)
-			logger.Debug("Parameters ==> "+strings.Repeat("%v, ", len(option.Args)), option.Args...)
+			logger.Debug("SQL        ==> %s", option.SqlStmt)
+			builder := strings.Builder{}
+			for i, arg := range option.Args {
+				builder.WriteString(fmt.Sprintf("%v(%T)", arg, arg))
+				if i != len(option.Args)-1 {
+					builder.WriteString(", ")
+				}
+			}
+			logger.Debug("PARAMETERS ==> " + builder.String())
 		},
 	}
 }
@@ -96,7 +107,7 @@ func SetupPaginationInterceptor() {
 				return
 			}
 
-			tail := fmt.Sprintf(" LIMIT %d, %d", page.PageSize(), (page.CurrentPage()-1)*page.PageSize())
+			tail := fmt.Sprintf("LIMIT %d, %d", page.PageSize(), (page.CurrentPage()-1)*page.PageSize())
 			if len(page.Orders()) != 0 {
 				tail = page.Orders().SqlStmt() + tail
 			}
@@ -110,7 +121,7 @@ func SetupPaginationInterceptor() {
 			end := strings.Index(option.SqlStmt, "FROM")
 			sqlStmt := option.SqlStmt[:start] + " COUNT(*) " + option.SqlStmt[end:]
 			if sqlDebugInterceptor != nil {
-				sqlDebugInterceptor.PreHandle(&ExecOption{SqlStmt: sqlStmt})
+				sqlDebugInterceptor.PreHandle(&ExecOption{SqlStmt: sqlStmt, Args: option.Args})
 			}
 			var count int
 			option.Execer.Exec(sqlStmt, &count)

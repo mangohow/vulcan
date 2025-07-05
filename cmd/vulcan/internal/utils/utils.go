@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -123,4 +124,22 @@ func GetCurrentPackagePath(filename string) (string, error) {
 	// \mapper\usermapper.go
 
 	return filepath.Join(modName, pkg), nil
+}
+
+func TrimLineWithPrefix(content []byte, sub ...[]byte) []byte {
+	lines := bytes.Split(content, []byte("\n"))
+	buf := bytes.Buffer{}
+	buf.Grow(len(content))
+loop:
+	for _, line := range lines {
+		for _, sb := range sub {
+			if bytes.HasPrefix(line, sb) {
+				continue loop
+			}
+		}
+		buf.Write(line)
+		buf.WriteByte('\n')
+	}
+
+	return buf.Bytes()
 }

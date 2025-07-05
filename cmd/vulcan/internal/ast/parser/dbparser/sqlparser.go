@@ -1,6 +1,7 @@
 package dbparser
 
 import (
+	"os"
 	"strings"
 
 	"github.com/blastrain/vitess-sqlparser/sqlparser"
@@ -124,6 +125,7 @@ func parseAliasedExprs(aliasedExprs []*sqlparser.AliasedExpr, paramSpec *types.P
 		if ex.As.String() != "" {
 			tableField = ex.As.String()
 		}
+		tableField = strings.Trim(tableField, " `")
 		tableFields = append(tableFields, tableField)
 	}
 
@@ -148,4 +150,46 @@ func parseAliasedExprs(aliasedExprs []*sqlparser.AliasedExpr, paramSpec *types.P
 	}
 
 	return tableFields, structFields, nil
+}
+
+func ParseSqlFile(filename string) error {
+	sqlContent, err := os.ReadFile(filename)
+	if err != nil {
+		return errors.Wrapf(err, "read file %s", filename)
+	}
+
+	stmts, err := sqlparser.Parse(string(sqlContent))
+	if err != nil {
+		return errors.Wrapf(err, "parse sql in file %s", filename)
+	}
+
+	sqlparser.Walk(func(node sqlparser.SQLNode) (kontinue bool, err error) {
+		return true, nil // TODO
+	}, stmts)
+
+	return nil
+}
+
+type TableSpec struct {
+	TableName string
+	Fields    []string
+}
+
+type TableField struct {
+	Name            string
+	Type            string
+	IsPrimaryKey    bool
+	IsAutoIncrement bool
+}
+
+// 解析建表语句
+func ParseCreationFields(stmt *sqlparser.CreateTable) *TableSpec {
+	res := &TableSpec{
+		TableName: stmt.Table.Name.String(),
+	}
+	//for _, column := range stmt.Columns {
+	//	field := &TableField{}
+	//}
+
+	return res
 }

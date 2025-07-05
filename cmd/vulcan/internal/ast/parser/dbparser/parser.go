@@ -1,7 +1,6 @@
 package dbparser
 
 import (
-	"bytes"
 	"fmt"
 	"go/ast"
 	astparser "go/parser"
@@ -58,11 +57,8 @@ func (p *FileParser) Parse(filename string) (*types.File, error) {
 	if err != nil {
 		return nil, errors.Errorf("reading file failed, reason: %v", err)
 	}
-	index := bytes.Index(source, []byte("package"))
-	if index == -1 {
-		return nil, errors.Errorf("source file is invalid, no package name declared")
-	}
-	f, err := astparser.ParseFile(p.fst, "", source[index:], astparser.ParseComments)
+	source = utils.TrimLineWithPrefix(source, []byte("//go:build "), []byte("// +build"), []byte("//go:generate"))
+	f, err := astparser.ParseFile(p.fst, "", source, astparser.ParseComments)
 	if err != nil {
 		return nil, errors.Errorf("parse file failed, reason: %s", err)
 	}
@@ -556,7 +552,7 @@ func (p *FileParser) parseFuncBody(body *ast.BlockStmt, fnDecl *types.FuncDecl, 
 		// 如果是select语句, 则需要找到select表字段和结构体字段的对应关系
 		if anno == types.SQLSelectFunc {
 			var err error
-			sqlStr, err = p.parseStaticSqlStmt(sqlStr, fnDecl)
+			sqlStr, err = p.parseStaticSelectSqlStmt(sqlStr, fnDecl)
 			if err != nil {
 				return err
 			}
@@ -581,6 +577,7 @@ func (p *FileParser) parseFuncBody(body *ast.BlockStmt, fnDecl *types.FuncDecl, 
 	sqls := make([]types.SQL, 0, len(scs))
 	// 解析为接口
 	for _, sc := range scs {
+		sc.basicInfo = fnDecl
 		s, err := parseSqlOperate(sc)
 		if err != nil {
 			return errors.Errorf("parse sql operate %s error, %v", sc.funcName, err)
@@ -588,12 +585,19 @@ func (p *FileParser) parseFuncBody(body *ast.BlockStmt, fnDecl *types.FuncDecl, 
 		sqls = append(sqls, s)
 	}
 
+	// 如果是Select语句，处理SELECT *
+	if anno == types.SQLSelectFunc {
+		if err := p.parseDynamicSelectSqlStmt(sqls, fnDecl); err != nil {
+			return err
+		}
+	}
+
 	fnDecl.Sql = sqls
 
 	return nil
 }
 
-func (p *FileParser) parseStaticSqlStmt(sql string, fnDecl *types.FuncDecl) (string, error) {
+func (p *FileParser) parseStaticSelectSqlStmt(sql string, fnDecl *types.FuncDecl) (string, error) {
 	// 如果返回值不为结构体类型
 	returnType := &fnDecl.FuncReturnResultParam.Type
 	returnType = returnType.GetValueType()
@@ -614,6 +618,76 @@ func (p *FileParser) parseStaticSqlStmt(sql string, fnDecl *types.FuncDecl) (str
 	fnDecl.SelectFields = structFields
 
 	return sql, nil
+}
+
+func (p *FileParser) parseDynamicSelectSqlStmt(sqls []types.SQL, fnDecl *types.FuncDecl) error {
+	// 如果返回值不为结构体类型
+	returnType := &fnDecl.FuncReturnResultParam.Type
+	returnType = returnType.GetValueType()
+	if returnType.IsBasicType() {
+		fnDecl.SelectFields = append(fnDecl.SelectFields, fnDecl.FuncReturnResultParam.Name)
+		return nil
+	}
+
+	builder := strings.Builder{}
+	builder.Grow(128)
+	var possibleTarger []*types.SimpleStmt
+	for _, sq := range sqls {
+		switch s := sq.(type) {
+		case *types.WhereStmt:
+			builder.WriteString("WHERE 1=1 ")
+			switch ss := s.Cond.(type) {
+			case *types.IfStmt:
+				builder.WriteString(ss.Sql)
+			case *types.IfChainStmt:
+				builder.WriteString(ss.Stmts[0].Sql)
+			case *types.ChooseStmt:
+				builder.WriteString(ss.Whens[0].Sql)
+			}
+		case *types.SetStmt:
+			builder.WriteString("SET ")
+			switch ss := s.Cond.(type) {
+			case *types.IfStmt:
+				builder.WriteString(ss.Sql)
+			case *types.IfChainStmt:
+				builder.WriteString(ss.Stmts[0].Sql)
+			case *types.ChooseStmt:
+				builder.WriteString(ss.Whens[0].Sql)
+			}
+		case *types.IfStmt:
+			builder.WriteString(s.Sql)
+		case *types.ForeachStmt:
+			builder.WriteString(s.Open)
+			builder.WriteString(s.Sql)
+			builder.WriteString(s.Close)
+		case *types.SimpleStmt:
+			builder.WriteString(s.Sql)
+			possibleTarger = append(possibleTarger, s)
+		case *types.EmptySQLImpl: // 什么也不做
+		default:
+			return errors.Errorf("unknown annotaion type: %T", sq)
+		}
+	}
+
+	sql := builder.String()
+	tableFields, structFields, star, err := ParseSelectFields(sql, fnDecl.FuncReturnResultParam)
+	if err != nil {
+		return errors.Wrapf(err, "parse sql error")
+	}
+	fnDecl.SelectFields = structFields
+	if !star {
+		return nil
+	}
+
+	// 替换*
+	for _, sq := range possibleTarger {
+		if strings.Contains(sq.Sql, " * ") {
+			sq.Sql = strings.Replace(sq.Sql, " * ", " "+strings.Join(tableFields, ", ")+" ", 1)
+			break
+		}
+	}
+
+	return nil
 }
 
 func parseAllCallExprDepth(expr ast.Expr) []*sqlCall {

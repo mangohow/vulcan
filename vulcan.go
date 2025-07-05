@@ -3,6 +3,7 @@ package vulcan
 import (
 	"database/sql"
 	"fmt"
+
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -108,3 +109,7 @@ func OpenMysql(dataSourceName string) (*sql.DB, error) {
 
 	return db, nil
 }
+
+// tableName: xxx
+// genFunc: Add, BatchAdd, DeleteById, UpdateById, GetById, SelectListByIds, SelectPage
+type TableProperty struct{}
