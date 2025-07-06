@@ -55,7 +55,7 @@ COLLATE=utf8mb4_unicode_ci;`
 		t.Fail()
 	}
 	fields := dbparser.ParseCreationFields(stmt)
-	source, imports, err := GenerateGoModelStruct(fields, &ModelGenOptions{
+	modelDetails, err := GenerateGoModelStruct(fields, &ModelGenOptions{
 		TablePrefix: "t",
 		UseNull:     true,
 		RepoSuffix:  "Repo",
@@ -65,6 +65,6 @@ COLLATE=utf8mb4_unicode_ci;`
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Println(imports)
-	fmt.Println(source)
+	fmt.Println(modelDetails.Imports)
+	fmt.Println(modelDetails.Source)
 }
