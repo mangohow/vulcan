@@ -6,3 +6,24 @@ import "strings"
 func TrimTrailingRedundantSpaces(s string) string {
 	return strings.TrimRight(s, " ") + " "
 }
+
+func ToPascalCase(snake string) string {
+	parts := strings.Split(snake, "_")
+	var result []string
+	for _, part := range parts {
+		if part != "" {
+			result = append(result, strings.Title(part))
+		}
+	}
+	return strings.Join(result, "")
+}
+
+func ToPascalCaseByList(parts []string) string {
+	var result []string
+	for _, part := range parts {
+		if part != "" {
+			result = append(result, strings.Title(part))
+		}
+	}
+	return strings.Join(result, "")
+}

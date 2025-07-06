@@ -78,3 +78,10 @@ func (u *UserMapper) SelectPage(page vulcan.Page, cond *model.QueryCond) []*mode
 			If(cond.Address != "", "AND address = #{cond.Address} ")).Build())
 	return nil
 }
+
+func (u *UserMapper) SelectListByIds(ids []int) []*model.User {
+	Select(SQL().
+		Stmt("SELECT * FROM t_user WHERE id IN").
+		Foreach("ids", "id", ", ", "(", ")", "#{id}").
+		Build())
+}

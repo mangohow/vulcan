@@ -3,6 +3,9 @@ package utils
 import (
 	"bytes"
 	"fmt"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,4 +145,60 @@ loop:
 	}
 
 	return buf.Bytes()
+}
+
+// IsDirExists 判断指定路径是否为存在的目录
+func IsDirExists(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	if !info.IsDir() {
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// 根据一个目录获取包名
+func GetPackageNameByDir(dir string) (string, error) {
+	absPath, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	dir = absPath
+	packageName := filepath.Base(dir)
+	// 如果目录下面有go文件, 则获取go文件中的包名
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", errors.Wrapf(err, "read dir %s", dir)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(entry.Name(), ".go") {
+			continue
+		}
+		absPath := filepath.Join(dir, entry.Name())
+		content, err := os.ReadFile(absPath)
+		if err != nil {
+			continue
+		}
+		f, err := parser.ParseFile(token.NewFileSet(), "", content, parser.PackageClauseOnly)
+		if err != nil {
+			continue
+		}
+		if f.Name == nil {
+			continue
+		}
+		packageName = f.Name.Name
+		break
+	}
+
+	return packageName, nil
 }

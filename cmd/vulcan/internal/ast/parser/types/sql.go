@@ -271,7 +271,7 @@ func NewForeachStmt(collectionName, itemName, separator, open, close, sql, itemT
 		Open:           strings.Trim(open, "`\""),
 		Close:          strings.Trim(close, "`\""),
 		Sql:            sq,
-		ItemType:       itemType, // TODO
+		ItemType:       itemType,
 		Args:           args,
 	}
 }

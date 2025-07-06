@@ -152,44 +152,84 @@ func parseAliasedExprs(aliasedExprs []*sqlparser.AliasedExpr, paramSpec *types.P
 	return tableFields, structFields, nil
 }
 
-func ParseSqlFile(filename string) error {
+func ParseSqlFile(filename string) ([]*TableSpec, error) {
 	sqlContent, err := os.ReadFile(filename)
 	if err != nil {
-		return errors.Wrapf(err, "read file %s", filename)
+		return nil, errors.Wrapf(err, "read file %s", filename)
 	}
 
-	stmts, err := sqlparser.Parse(string(sqlContent))
-	if err != nil {
-		return errors.Wrapf(err, "parse sql in file %s", filename)
+	var res []*TableSpec
+	// 分割sql语句
+	sqls := strings.Split(string(sqlContent), ";")
+	for _, sq := range sqls {
+		sq = strings.TrimSpace(sq)
+		if !strings.Contains(sq, "create table") && !strings.Contains(sq, "CREATE TABLE") {
+			continue
+		}
+		stmt, err := sqlparser.Parse(sq)
+		if err != nil {
+			return nil, errors.Wrapf(err, "parse sql in file %s", filename)
+		}
+		createStmt, ok := stmt.(*sqlparser.CreateTable)
+		if !ok {
+			continue
+		}
+
+		tableSpec := ParseCreationFields(createStmt)
+		res = append(res, tableSpec)
 	}
 
-	sqlparser.Walk(func(node sqlparser.SQLNode) (kontinue bool, err error) {
-		return true, nil // TODO
-	}, stmts)
-
-	return nil
+	return res, nil
 }
 
 type TableSpec struct {
 	TableName string
-	Fields    []string
+	Columns   []*TableColumn
 }
 
-type TableField struct {
+type TableColumn struct {
 	Name            string
 	Type            string
 	IsPrimaryKey    bool
 	IsAutoIncrement bool
+	NotNull         bool
 }
 
 // 解析建表语句
 func ParseCreationFields(stmt *sqlparser.CreateTable) *TableSpec {
 	res := &TableSpec{
-		TableName: stmt.Table.Name.String(),
+		TableName: stmt.NewName.Name.String(),
 	}
-	//for _, column := range stmt.Columns {
-	//	field := &TableField{}
-	//}
+	for _, def := range stmt.Columns {
+		typeName := strings.ToLower(def.Type)
+		items := strings.Split(typeName, " ")
+		if len(items) > 1 {
+			typeName = items[0]
+		}
+		index := strings.Index(def.Type, "(")
+		if index != -1 {
+			typeName = def.Type[:index]
+		}
+		if items[1] == "unsigned" {
+			typeName += " unsigned"
+		}
+		c := &TableColumn{
+			Name: def.Name,
+			Type: typeName,
+		}
+
+		for _, opt := range def.Options {
+			switch opt.Type {
+			case sqlparser.ColumnOptionPrimaryKey:
+				c.IsPrimaryKey = true
+			case sqlparser.ColumnOptionNotNull:
+				c.NotNull = true
+			case sqlparser.ColumnOptionAutoIncrement:
+				c.IsAutoIncrement = true
+			}
+		}
+		res.Columns = append(res.Columns, c)
+	}
 
 	return res
 }
