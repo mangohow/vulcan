@@ -55,7 +55,7 @@ func generateMapperByStructModel(options *command.CommandOptions, modelSpecs []*
 	}
 
 	// 生成中间代码
-	source, err := dbgenerator.GenerateCRUDFuncsByModel(modelSpecs)
+	source, err := dbgenerator.GenerateCRUDFuncsByModel(modelSpecs, options)
 	if err != nil {
 		return err
 	}

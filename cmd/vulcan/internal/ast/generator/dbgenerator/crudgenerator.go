@@ -5,33 +5,47 @@ import (
 	"github.com/mangohow/mangokit/tools/collection"
 	"github.com/mangohow/mangokit/tools/stream"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/command"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
 	"io"
 	"strconv"
 	"strings"
 )
 
-type CRUDGenFunc func(spec *types.TypeSpec, indexes []int, useNull bool) (string, error)
+type CRUDGenFunc func(spec *types.TypeSpec, options *CommonOptions, indexes []int, useNull bool) (string, error)
 
 var ( // TODO
 	crudGenFuncMapping = map[string]CRUDGenFunc{
-		"Add": func(spec *types.TypeSpec, indexes []int, useNull bool) (string, error) {
+		"Add": func(spec *types.TypeSpec, options *CommonOptions, indexes []int, useNull bool) (string, error) {
 			return "", nil
 		},
 	}
 )
 
-func generateCRUDFunc(name string, indexes []int, useNull bool, spec *types.TypeSpec) (string, error) {
-	fn, ok := crudGenFuncMapping[name]
+func generateCRUDFunc(genFuncName, tableName string, indexes []int, useNull bool, spec *types.TypeSpec, options *command.CommandOptions) (string, error) {
+	fn, ok := crudGenFuncMapping[genFuncName]
 	if !ok {
-		return "", errors.Errorf("gen func %s is invalid", name)
+		return "", errors.Errorf("gen func %s is invalid", genFuncName)
 	}
 
-	return fn(spec, indexes, useNull)
+	modelTypeName := spec.Name
+	modelObjName := strings.ToLower(spec.Name[:1]) + spec.Name[1:]
+	if spec.Package.PackageName != "" {
+		modelTypeName = spec.Package.PackageName + "." + modelTypeName
+	}
+	commonOptions := &CommonOptions{
+		MapperName:    strings.ToUpper(spec.Name[:1]) + spec.Name[1:] + options.RepoSuffix,
+		ReceiverName:  strings.ToLower(spec.Name[:1]),
+		ModelObjName:  modelObjName,
+		ModelTypeName: modelTypeName,
+		TableName:     tableName,
+	}
+
+	return fn(spec, commonOptions, indexes, useNull)
 }
 
 // 根据model生成中间代码
-func GenerateCRUDFuncsByModel(modelSpecs []*types.TypeSpec) ([]io.Reader, error) {
+func GenerateCRUDFuncsByModel(modelSpecs []*types.TypeSpec, options *command.CommandOptions) ([]io.Reader, error) {
 	readers := make([]io.Reader, 0, len(modelSpecs))
 	for _, modelSpec := range modelSpecs {
 		items := stream.Filter(modelSpec.Fields, func(param *types.Param) bool {
@@ -87,7 +101,7 @@ func GenerateCRUDFuncsByModel(modelSpecs []*types.TypeSpec) ([]io.Reader, error)
 				useNull = ok
 			}
 
-			source, err := generateCRUDFunc(name, indexes, useNull, modelSpec)
+			source, err := generateCRUDFunc(name, tableName, indexes, useNull, modelSpec, options)
 			if err != nil {
 				return nil, err
 			}

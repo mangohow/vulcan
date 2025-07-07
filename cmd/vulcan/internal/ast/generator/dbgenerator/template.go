@@ -43,16 +43,16 @@ var (
 }`
 )
 
-type MapperTemplateOptions struct {
-	MapperName string
-}
-
-type AddFuncTemplateOptions struct {
-	ReceiverName  string // 接收器变量名
-	MapperName    string // mapper结构体名
+type CommonOptions struct {
+	MapperName    string // 接收器变量名
+	ReceiverName  string // mapper结构体名
 	ModelObjName  string // 结构体模型名
 	ModelTypeName string // 结构体模型类型名, 如果跟mapper不在同一个包, 则携带包名
 	TableName     string // 数据库表名
-	TableFields   string // 表所有字段
-	StructFields  string // 所有结构体字段
+}
+
+type AddFuncTemplateOptions struct {
+	*CommonOptions
+	TableFields  string // 表所有字段
+	StructFields string // 所有结构体字段
 }
