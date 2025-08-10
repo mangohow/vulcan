@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/mangohow/mangokit/tools/math"
-	"github.com/mangohow/mangokit/tools/stream"
+	"github.com/mangohow/gowlb/tools/math"
+	"github.com/mangohow/gowlb/tools/stream"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
@@ -298,9 +298,8 @@ func (p *TypeParser) parseStructType(info *ast.StructType, typeSpec *types.TypeS
 			}
 		}
 		if field.Tag != nil {
-			stream.ForEach(params, func(param *types.Param) bool {
+			stream.ForEach(params, func(param *types.Param) {
 				param.Type.Tag = reflect.StructTag(strings.Trim(field.Tag.Value, "`"))
-				return true
 			})
 		}
 
@@ -309,9 +308,8 @@ func (p *TypeParser) parseStructType(info *ast.StructType, typeSpec *types.TypeS
 			return nil
 		}
 
-		stream.ForEach(params[1:], func(param *types.Param) bool {
+		stream.ForEach(params[1:], func(param *types.Param) {
 			param.Type = params[0].Type
-			return true
 		})
 
 		return params

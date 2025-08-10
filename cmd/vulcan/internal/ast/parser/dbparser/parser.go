@@ -9,8 +9,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/mangohow/mangokit/tools/collection"
-	"github.com/mangohow/mangokit/tools/stream"
+	"github.com/mangohow/gowlb/tools/collection"
+	"github.com/mangohow/gowlb/tools/stream"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/astutils"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
@@ -64,14 +64,14 @@ func (p *FileParser) Parse(filename string) (*types.File, error) {
 	}
 
 	// 处理导入的包
-	packageInfo := p.parseImports(f, filename)
+	packageInfo := parseImports(f, filename)
 	currentPkg, err := utils.GetCurrentPackagePath(filename)
 	if err != nil {
 		return nil, err
 	}
 	packageInfo.PackagePath = currentPkg
 
-	if err := p.checkNecessaryPackageImport(packageInfo.Imports); err != nil {
+	if err := checkNecessaryPackageImport(p.necessaryPackages, packageInfo.Imports); err != nil {
 		return nil, err
 	}
 
@@ -106,44 +106,6 @@ func (p *FileParser) Parse(filename string) (*types.File, error) {
 	})...)
 
 	return fileInfo, nil
-}
-
-// 解析文件导入的包
-func (p *FileParser) parseImports(af *ast.File, filepath string) types.PackageInfo {
-	pkg := types.PackageInfo{
-		FilePath:    filepath,
-		PackageName: af.Name.Name,
-		AstImports:  af.Imports,
-		ImportsMap:  make(map[string]string),
-	}
-
-	for _, imp := range af.Imports {
-		impInfo := types.ImportInfo{}
-		if imp.Path != nil {
-			impInfo.AbsPackagePath = strings.Trim(imp.Path.Value, "`\"")
-		}
-		if imp.Name != nil {
-			impInfo.Name = imp.Name.Name
-		}
-		pkg.Imports = append(pkg.Imports, impInfo)
-		pkg.ImportsMap[impInfo.AbsPackagePath] = impInfo.Name
-	}
-
-	return pkg
-}
-
-// 检查必要的包导入情况
-func (p *FileParser) checkNecessaryPackageImport(imports []types.ImportInfo) error {
-	for _, name := range p.necessaryPackages {
-		_, exist := utils.Find(imports, func(info types.ImportInfo) bool {
-			return info.AbsPackagePath == name
-		})
-		if !exist {
-			return errors.Errorf("package %s is not imported", name)
-		}
-	}
-
-	return nil
 }
 
 // 解析所有声明
@@ -342,7 +304,7 @@ func (p *FileParser) parseInputParameter(params []*ast.Field, res *types.FuncDec
 		inputParams = make(map[string]*types.Param)
 	)
 
-	stream.ForEach(params, func(field *ast.Field) bool {
+	if err = stream.ForEachE(params, func(field *ast.Field) error {
 		paramList := make([]*types.Param, len(field.Names))
 		for i := range field.Names {
 			paramList[i] = &types.Param{
@@ -352,7 +314,7 @@ func (p *FileParser) parseInputParameter(params []*ast.Field, res *types.FuncDec
 
 		var param types.Param
 		if err = p.parseFieldExpr(field.Type, &param, pkgInfo); err != nil {
-			return false
+			return err
 		}
 
 		for i := range paramList {
@@ -360,10 +322,8 @@ func (p *FileParser) parseInputParameter(params []*ast.Field, res *types.FuncDec
 			inputParams[paramList[i].Name] = paramList[i]
 		}
 
-		return true
-	})
-
-	if err != nil {
+		return nil
+	}); err != nil {
 		return err
 	}
 
@@ -722,4 +682,42 @@ func parseAllCallExprDepth(expr ast.Expr) []*sqlCall {
 
 	fn(expr)
 	return res
+}
+
+// 解析文件导入的包
+func parseImports(af *ast.File, filepath string) types.PackageInfo {
+	pkg := types.PackageInfo{
+		FilePath:    filepath,
+		PackageName: af.Name.Name,
+		AstImports:  af.Imports,
+		ImportsMap:  make(map[string]string),
+	}
+
+	for _, imp := range af.Imports {
+		impInfo := types.ImportInfo{}
+		if imp.Path != nil {
+			impInfo.AbsPackagePath = strings.Trim(imp.Path.Value, "`\"")
+		}
+		if imp.Name != nil {
+			impInfo.Name = imp.Name.Name
+		}
+		pkg.Imports = append(pkg.Imports, impInfo)
+		pkg.ImportsMap[impInfo.AbsPackagePath] = impInfo.Name
+	}
+
+	return pkg
+}
+
+// 检查必要的包导入情况
+func checkNecessaryPackageImport(neededPackages []string, imports []types.ImportInfo) error {
+	for _, name := range neededPackages {
+		_, exist := utils.Find(imports, func(info types.ImportInfo) bool {
+			return info.AbsPackagePath == name
+		})
+		if !exist {
+			return errors.Errorf("package %s is not imported", name)
+		}
+	}
+
+	return nil
 }

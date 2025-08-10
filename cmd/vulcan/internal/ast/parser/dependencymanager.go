@@ -5,7 +5,7 @@ import (
 	"go/token"
 	"strings"
 
-	"github.com/mangohow/mangokit/tools/stream"
+	"github.com/mangohow/gowlb/tools/stream"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils"

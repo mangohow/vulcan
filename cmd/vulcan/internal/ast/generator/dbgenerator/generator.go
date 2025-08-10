@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mangohow/mangokit/tools/collection"
-	"github.com/mangohow/mangokit/tools/stream"
-	"github.com/mangohow/mangokit/tools/strutil"
+	"github.com/mangohow/gowlb/tools/collection"
+	"github.com/mangohow/gowlb/tools/stream"
+	"github.com/mangohow/gowlb/tools/strutil"
 
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
@@ -900,22 +900,22 @@ func (g *FileGenerator) generateCode(filename string) error {
 			return t.AstDecl
 		}
 
-		stream.ForEach(genDecl.Specs, func(spec ast.Spec) bool {
+		stream.ForEach(genDecl.Specs, func(spec ast.Spec) {
 			typeSpec, ok := spec.(*ast.TypeSpec)
 			if !ok {
-				return true
+				return
 			}
 			if typeSpec.Type == nil {
-				return true
+				return
 			}
 
 			st, ok := typeSpec.Type.(*ast.StructType)
 			if !ok {
-				return true
+				return
 			}
 
 			if st.Fields == nil || len(st.Fields.List) != 1 {
-				return true
+				return
 			}
 
 			st.Fields.List = append(st.Fields.List, &ast.Field{
@@ -923,7 +923,7 @@ func (g *FileGenerator) generateCode(filename string) error {
 				Type:  ast.NewIdent(tempName),
 			})
 
-			return true
+			return
 		})
 
 		return t.AstDecl

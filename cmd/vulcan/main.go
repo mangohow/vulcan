@@ -1,7 +1,12 @@
 package main
 
 import (
-	"github.com/mangohow/mangokit/tools/stream"
+	"go/token"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/mangohow/gowlb/tools/stream"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/generator/dbgenerator"
 	parser2 "github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/dbparser"
@@ -11,10 +16,6 @@ import (
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/log"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils"
 	"github.com/spf13/cobra"
-	"go/token"
-	"os"
-	"path/filepath"
-	"strings"
 )
 
 var (
@@ -22,6 +23,15 @@ var (
 		Use:   "vulcan",
 		Short: "vulcan is a cli tool for generating go codes",
 		Long:  "vulcan is a cli tool for generating go codes",
+		Example: `1.gen database access object:
+    vulcan -f example/repo/userrepo.go
+2.gen database access object by models:
+    vulcan --struct-gen -f example/model/user.go -o example/repo --table-prefix t --repo-suffix repo
+    or
+    vulcan --struct-gen -f example/model/user.go -o example/repo/userrepo.go --table-prefix t
+3.gen model and database access object by sql ddl:
+    vulcan --ddl-gen -f example/db/db.sql -o example/repo --model-output example/model --table-prefix t --repo-suffix repo --tags json
+`,
 		Run: func(cmd *cobra.Command, args []string) {
 			options := parseCommandArgs(cmd)
 			if options.DDLGen {
@@ -45,21 +55,31 @@ var (
 	}
 )
 
-func generateMapperByStructModel(options *command.CommandOptions, modelSpecs []*types.TypeSpec) (err error) {
+func generateMapperByStructModel(options *command.CommandOptions, modelSpecs []*types.ModelSpec) (err error) {
 	if modelSpecs == nil {
+		fst := token.NewFileSet()
+		dependencyManager := parser2.NewDependencyManager(fst)
+		parser := dbparser.NewModelStructParser(fst, dependencyManager, options)
 		// 解析model struct
-		modelSpecs, err = dbparser.ParseModelFile()
+		modelSpecs, err = parser.Parse()
 		if err != nil {
 			return err
 		}
 	}
 
 	// 生成中间代码
+	generator := dbgenerator.NewCRUDGenerator(options, modelSpecs)
+	if err := generator.Execute(); err != nil {
+		return err
+	}
+
+	return nil
+
 	source, err := dbgenerator.GenerateCRUDFuncsByModel(modelSpecs, options)
 	if err != nil {
 		return err
 	}
-
+	_ = source
 	// TODO  写入package、 go generate等
 	sourcePath := options.OutPutPath
 	sourcePath, err = filepath.Abs(sourcePath)
@@ -82,7 +102,7 @@ func generateMapperByStructModel(options *command.CommandOptions, modelSpecs []*
 		filename = filename[:index]
 	}
 	filename = filepath.Join(sourcePath, filename+".go")
-	if err = os.WriteFile(filename, source, 0644); err != nil {
+	if err = os.WriteFile(filename, nil, 0644); err != nil {
 		return errors.Wrapf(err, "write source to %s failed", filename)
 	}
 

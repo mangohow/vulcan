@@ -2,18 +2,19 @@ package dbgenerator
 
 import (
 	"fmt"
-	"github.com/mangohow/mangokit/tools/collection"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"strings"
+
+	"github.com/mangohow/gowlb/tools/collection"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/dbparser"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/command"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils/stringutils"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"reflect"
-	"strings"
 )
 
 var (
@@ -121,14 +122,16 @@ var (
 		"string": reflect.String,
 		"[]byte": reflect.Slice,
 
-		"NullInt64":   reflect.Struct,
-		"NullInt32":   reflect.Struct,
-		"NullInt16":   reflect.Struct,
-		"NullFloat64": reflect.Struct,
-		"NullString":  reflect.Struct,
-		"NullByte":    reflect.Struct,
-		"NullTime":    reflect.Struct,
-		"NullBool":    reflect.Struct,
+		"sql.NullInt64":   reflect.Struct,
+		"sql.NullInt32":   reflect.Struct,
+		"sql.NullInt16":   reflect.Struct,
+		"sql.NullFloat64": reflect.Struct,
+		"sql.NullString":  reflect.Struct,
+		"sql.NullByte":    reflect.Struct,
+		"sql.NullTime":    reflect.Struct,
+		"sql.NullBool":    reflect.Struct,
+
+		"sql.Null": reflect.Struct,
 	}
 )
 
@@ -138,7 +141,15 @@ func getGoTypeFromSqlType(sqlType string, useNull bool) (string, error) {
 		ok  bool
 	)
 
-	if useNull {
+	// go版本>=1.22时, 可以使用sql.Null
+	version := utils.GetSystemGoVersion()
+	if useNull && version >= 22 {
+		res, ok = sqlColumnToGoTypeMapping[sqlType]
+		if !ok {
+			return "", errors.Errorf("unsupport sql type %s", sqlType)
+		}
+		return fmt.Sprintf("sql.Null[%s]", res), nil
+	} else if useNull {
 		res, ok = sqlColumnToGoTypeMappingUseNull[sqlType]
 		res = "sql." + res
 	} else {
@@ -159,9 +170,7 @@ type ModelSpec struct {
 func (m *ModelSpec) GetImports() []string {
 	set := collection.NewSet[string]()
 	for _, field := range m.Fields {
-		for _, path := range field.Imports {
-			set.Add(path)
-		}
+		set.Adds(field.Imports...)
 	}
 
 	return set.Values()
@@ -232,9 +241,7 @@ func GenerateGoModelStructList(specList []*dbparser.TableSpec, options *command.
 		}
 		srcBuilder.WriteString(modelDetails.Source)
 		srcBuilder.WriteByte('\n')
-		for _, importPath := range modelDetails.Imports {
-			importSet.Add(importPath)
-		}
+		importSet.Adds(modelDetails.Imports...)
 		res = append(res, modelDetails.Type)
 	}
 
@@ -339,6 +346,7 @@ func GenerateTypeSpecs(modelSpec *ModelSpec) (*types.TypeSpec, error) {
 				PackageName: "sql",
 			}
 		} else {
+			// TODO
 			sf.Type.Kind = goTypeToReflectKindMapping[field.Type]
 		}
 
@@ -366,19 +374,12 @@ func GenerateGoModelStruct(spec *dbparser.TableSpec, modelGenOptions *ModelGenOp
 	builder.WriteString("type ")
 	builder.WriteString(modelSpec.ModelStructName)
 	builder.WriteString(" struct {\n")
-	hasPrimaryKey := false
-	for _, col := range spec.Columns {
-		if col.IsPrimaryKey {
-			hasPrimaryKey = true
-			break
-		}
-	}
-	genFuncs := []string{"Add", "BatchAdd", "SelectPage(|true)"}
-	if hasPrimaryKey {
-		genFuncs = append(genFuncs, "DeleteById", "GetById", "SelectListByIds", "UpdateById(|true)")
+	// 对genFuncs校验
+	if err := validateGenFuncList(spec.GenFuncList); err != nil {
+		return nil, err
 	}
 	// 写入TableProperty
-	builder.WriteString(fmt.Sprintf("\tvulcan.TableProperty `tableName:\"%s\" gen:\"%s\"`\n\n", spec.TableName, strings.Join(genFuncs, ",")))
+	builder.WriteString(fmt.Sprintf("\tvulcan.TableProperty `tableName:\"%s\" gen:\"%s\"`\n", spec.TableName, strings.Join(spec.GenFuncList, "|")))
 	for _, field := range modelSpec.Fields {
 		builder.WriteString("\t")
 		builder.WriteString(field.Name)
@@ -419,7 +420,8 @@ func convertToModelSpec(spec *dbparser.TableSpec, modelGenOptions *ModelGenOptio
 		}
 		if strings.Contains(goType, "sql.") {
 			modelFieldSpec.AddImport("database/sql")
-		} else if strings.Contains(goType, "time.") {
+		}
+		if strings.Contains(goType, "time.") {
 			modelFieldSpec.AddImport("time")
 		}
 
@@ -445,4 +447,8 @@ func convertToModelSpec(spec *dbparser.TableSpec, modelGenOptions *ModelGenOptio
 	}
 
 	return modelSpec, nil
+}
+
+func validateGenFuncList(fns []string) error {
+
 }

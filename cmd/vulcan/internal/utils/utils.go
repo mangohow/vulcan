@@ -3,12 +3,15 @@ package utils
 import (
 	"bytes"
 	"fmt"
-	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
 )
 
 func Keys[K comparable, V any](m map[K]V) []K {
@@ -201,4 +204,37 @@ func GetPackageNameByDir(dir string) (string, error) {
 	}
 
 	return packageName, nil
+}
+
+// 获取系统go版本, 只返回.之后的数字, 比如 1.18则返回18
+// 如果获取失败, 默认为1.18
+func GetSystemGoVersion() int {
+	const defaultVersion = 18
+	cmd := exec.Command("go", "version")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		return defaultVersion
+	}
+
+	// 输出示例: go version go1.21.3 linux/amd64
+	parts := strings.Fields(out.String())
+	if len(parts) < 3 {
+		return defaultVersion
+	}
+
+	version := strings.TrimPrefix(parts[2], "go")
+	parts = strings.Split(version, ".")
+	if len(parts) < 2 {
+		return defaultVersion
+	}
+
+	v := parts[1]
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return defaultVersion
+	}
+
+	return n
 }

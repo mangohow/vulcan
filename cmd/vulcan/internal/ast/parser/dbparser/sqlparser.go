@@ -5,9 +5,13 @@ import (
 	"strings"
 
 	"github.com/blastrain/vitess-sqlparser/sqlparser"
-	"github.com/mangohow/mangokit/tools/stream"
+	"github.com/mangohow/gowlb/tools/stream"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
+)
+
+const (
+	commentGenKey = "+gen:"
 )
 
 func ParseSelectFields(sql string, paramSpec *types.Param) ([]string, []string, bool, error) {
@@ -62,12 +66,12 @@ func parseStarExpr(paramSpec *types.Param) ([]string, []string, error) {
 		structFieldNames = make([]string, 0, len(structTypeSpec.Fields))
 	)
 
-	stream.ForEach(structTypeSpec.Fields, func(param *types.Param) bool {
+	stream.ForEach(structTypeSpec.Fields, func(param *types.Param) {
 		fieldName := param.Name
 		// 先尝试从db标签中获取字段名
 		tagStr := param.Type.Tag.Get("db")
 		if tagStr == "" {
-			return true
+			return
 		}
 		tagItems := strings.Split(tagStr, ",")
 		dbFieldName := ""
@@ -80,12 +84,10 @@ func parseStarExpr(paramSpec *types.Param) ([]string, []string, error) {
 		structFieldNames = append(structFieldNames, fieldName)
 		if dbFieldName != "" {
 			dbFieldNames = append(dbFieldNames, dbFieldName)
-			return true
+			return
 		}
 
 		// 根据转换规则获取 TODO
-
-		return true
 	})
 
 	if len(structFieldNames) == 0 {
@@ -162,6 +164,21 @@ func ParseSqlFile(filename string) ([]*TableSpec, error) {
 	// 分割sql语句
 	sqls := strings.Split(string(sqlContent), ";")
 	for _, sq := range sqls {
+		lines := strings.Split(sq, "\n")
+		var genFuncs []string
+		stream.ForEach(lines, func(line string) {
+			if !strings.Contains(line, commentGenKey) {
+				return
+			}
+
+			idx := strings.Index(line, commentGenKey)
+			line = strings.Trim(line[idx+len(commentGenKey):], " ")
+			funcList := strings.Split(line, "|")
+			funcList = stream.Map(funcList, func(s string) string {
+				return strings.TrimSpace(s)
+			})
+			genFuncs = append(genFuncs, funcList...)
+		})
 		sq = strings.TrimSpace(sq)
 		if !strings.Contains(sq, "create table") && !strings.Contains(sq, "CREATE TABLE") {
 			continue
@@ -176,6 +193,7 @@ func ParseSqlFile(filename string) ([]*TableSpec, error) {
 		}
 
 		tableSpec := ParseCreationFields(createStmt)
+		tableSpec.GenFuncList = genFuncs
 		res = append(res, tableSpec)
 	}
 
@@ -183,8 +201,9 @@ func ParseSqlFile(filename string) ([]*TableSpec, error) {
 }
 
 type TableSpec struct {
-	TableName string
-	Columns   []*TableColumn
+	TableName   string
+	GenFuncList []string
+	Columns     []*TableColumn
 }
 
 type TableColumn struct {
@@ -230,6 +249,26 @@ func ParseCreationFields(stmt *sqlparser.CreateTable) *TableSpec {
 		}
 		res.Columns = append(res.Columns, c)
 	}
+
+	var pk string
+	for _, constraint := range stmt.Constraints {
+		if constraint.Type == sqlparser.ConstraintPrimaryKey && len(constraint.Keys) > 0 {
+			pk = constraint.Keys[0].String()
+			break
+		}
+	}
+
+	if pk == "" {
+		return res
+	}
+
+	stream.ForEachB(res.Columns, func(column *TableColumn) bool {
+		if column.Name == pk {
+			column.IsPrimaryKey = true
+			return false
+		}
+		return true
+	})
 
 	return res
 }

@@ -2,146 +2,137 @@ package dbgenerator
 
 import (
 	"bytes"
-	"github.com/mangohow/mangokit/tools/collection"
-	"github.com/mangohow/mangokit/tools/stream"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/command"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
-	"io"
-	"strconv"
-	"strings"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils"
 )
 
-type CRUDGenFunc func(spec *types.TypeSpec, options *CommonOptions, indexes []int, useNull bool) (string, error)
+type CRUDGenFunc func(spec *types.ModelSpec, options *CommonOptions) (string, error)
 
 var ( // TODO
 	crudGenFuncMapping = map[string]CRUDGenFunc{
-		"Add": func(spec *types.TypeSpec, options *CommonOptions, indexes []int, useNull bool) (string, error) {
+		"Add": func(modelSpec *types.ModelSpec, options *CommonOptions) (string, error) {
 			return "", nil
 		},
 	}
 )
 
-func generateCRUDFunc(genFuncName, tableName string, indexes []int, useNull bool, spec *types.TypeSpec, options *command.CommandOptions) (string, error) {
-	fn, ok := crudGenFuncMapping[genFuncName]
+type CRUDGenerator struct {
+	options        *command.CommandOptions
+	modelSpecs     []*types.ModelSpec
+	importPackages []string
+}
+
+func NewCRUDGenerator(options *command.CommandOptions, modelSpecs []*types.ModelSpec) *CRUDGenerator {
+	return &CRUDGenerator{
+		options:    options,
+		modelSpecs: modelSpecs,
+		importPackages: []string{
+			`"database/sql"`,
+			`"github.com/mangohow/vulcan"`,
+			`. "github.com/mangohow/vulcan/annotation"`,
+		},
+	}
+}
+
+func (g *CRUDGenerator) Execute() error {
+	return g.generateCRUDFuncsByModel()
+}
+
+func (g *CRUDGenerator) generateCRUDFunc(modelSpec *types.ModelSpec, funcSpec *types.GenFuncSpec, commonOptions *CommonOptions) (string, error) {
+	fn, ok := crudGenFuncMapping[funcSpec.KeyFuncName]
 	if !ok {
-		return "", errors.Errorf("gen func %s is invalid", genFuncName)
+		return "", errors.Errorf("gen func %s is invalid", funcSpec.FuncName)
 	}
 
-	modelTypeName := spec.Name
-	modelObjName := strings.ToLower(spec.Name[:1]) + spec.Name[1:]
-	if spec.Package.PackageName != "" {
-		modelTypeName = spec.Package.PackageName + "." + modelTypeName
-	}
-	commonOptions := &CommonOptions{
-		MapperName:    strings.ToUpper(spec.Name[:1]) + spec.Name[1:] + options.RepoSuffix,
-		ReceiverName:  strings.ToLower(spec.Name[:1]),
-		ModelObjName:  modelObjName,
-		ModelTypeName: modelTypeName,
-		TableName:     tableName,
-	}
-
-	return fn(spec, commonOptions, indexes, useNull)
+	return fn(modelSpec, commonOptions)
 }
 
 // 根据model生成中间代码
-func GenerateCRUDFuncsByModel(modelSpecs []*types.TypeSpec, options *command.CommandOptions) ([]io.Reader, error) {
-	readers := make([]io.Reader, 0, len(modelSpecs))
-	for _, modelSpec := range modelSpecs {
-		items := stream.Filter(modelSpec.Fields, func(param *types.Param) bool {
-			return param.Type.Name == "TableProperty" && param.Type.Package.PackagePath == corePackagePath
-		})
-		if len(items) == 0 {
-			continue
-		}
-
-		tableProperties := items[0].Type.Tag
-		tableName := tableProperties.Get("tableName")
-		tableName = strings.TrimSpace(tableName)
-		if tableName == "" {
-			return nil, errors.Errorf("table name is empty")
-		}
-		funcNames := tableProperties.Get("gen")
-		crudFnNameList := stream.Map(strings.Split(funcNames, ","), func(t string) string {
-			return strings.TrimSpace(t)
-		})
-		if len(crudFnNameList) == 0 {
-			continue
+func (g *CRUDGenerator) generateCRUDFuncsByModel() error {
+	// 获取mapper的包名
+	outputPath := g.options.OutPutPath
+	if strings.HasSuffix(outputPath, ".go") {
+		outputPath = filepath.Dir(outputPath)
+	}
+	packageName, err := utils.GetPackageNameByDir(outputPath)
+	if err != nil {
+		return errors.Wrapf(err, "get mapper package name failed")
+	}
+	for _, modelSpec := range g.modelSpecs {
+		modelObjName := strings.ToLower(modelSpec.ModelName[:1]) + modelSpec.ModelName[1:]
+		modelTypeName := modelSpec.PackageName + "." + modelSpec.ModelName
+		commonOptions := &CommonOptions{
+			MapperName:    strings.ToUpper(modelSpec.ModelName[:1]) + modelSpec.ModelName[1:] + g.options.RepoSuffix,
+			ReceiverName:  strings.ToLower(modelSpec.ModelName[:1]),
+			ModelObjName:  modelObjName,
+			ModelTypeName: modelTypeName,
+			TableName:     modelSpec.TableName,
 		}
 
 		buffer := bytes.NewBuffer(nil)
-		for _, curdFnName := range crudFnNameList {
-			if curdFnName == "" {
-				continue
-			}
-			name, argStr, found := strings.Cut(curdFnName, "(")
-			if found {
-				argStr = strings.TrimRight(argStr, ")")
-			}
-			args := stream.Map(strings.Split(argStr, "|"), func(t string) string {
-				return strings.TrimSpace(t)
-			})
-			var (
-				indexes []int
-				useNull bool
-				err     error
-			)
-			if len(args) > 0 {
-				indexes, err = parseIndexes(args[0])
-				if err != nil {
-					return nil, err
-				}
-			}
+		buffer.Grow(8 << 10)
+		// 写入编译选项
+		buffer.WriteString("//go:build vulcan\n\n")
+		// 写入go generate
+		buffer.WriteString("//go:generate ${GOPATH}/bin/vulcan gen db\n")
+		// 写入package
+		buffer.WriteString("package ")
+		buffer.WriteString(packageName)
+		buffer.WriteString("\n")
+		// 写入import
+		buffer.WriteString("import (\n")
+		for _, imp := range g.importPackages {
+			buffer.WriteString(imp)
+			buffer.WriteString("\n")
+		}
+		buffer.WriteString(fmt.Sprintf("%q\n)\n\n", modelSpec.ImportPath))
+		// 写入结构体声明
+		buffer.WriteString(fmt.Sprintf("type %s struct {\n\tdb *sql.DB\n}\n\n", commonOptions.MapperName))
+		// 写入结构体构造函数
+		buffer.WriteString(fmt.Sprintf("func New%s(db *sql.DB) *%s {\n\treturn &%s{\n\t\tdb: db,\n\t}\n}\n\n", commonOptions.MapperName, commonOptions.MapperName, commonOptions.MapperName))
 
-			if len(args) > 1 {
-				ok, err := strconv.ParseBool(args[1])
-				if err != nil {
-					return nil, err
-				}
-				useNull = ok
-			}
-
-			source, err := generateCRUDFunc(name, tableName, indexes, useNull, modelSpec, options)
+		for _, curdFnSpec := range modelSpec.FuncSpecs {
+			source, err := g.generateCRUDFunc(modelSpec, curdFnSpec, commonOptions)
 			if err != nil {
-				return nil, err
+				return err
 			}
 
 			buffer.WriteString(source)
 			buffer.WriteString("\n")
 		}
 
-		readers = append(readers, buffer)
+		outputPath = g.options.OutPutPath
+		if !strings.HasSuffix(outputPath, ".go") {
+			outputPath = filepath.Join(outputPath, strings.ToLower(commonOptions.MapperName)+".go")
+		}
+		if err := g.writeSource(buffer, outputPath); err != nil {
+			return errors.Wrapf(err, "write source failed")
+		}
 	}
 
-	return readers, nil
+	return nil
 }
 
-func parseIndexes(indexStr string) ([]int, error) {
-	set := collection.NewSet[int]()
-	indexStrList := strings.Split(indexStr, ",")
-	for _, idxStr := range indexStrList {
-		before, after, found := strings.Cut(idxStr, "-")
-		if !found {
-			i, err := strconv.Atoi(idxStr)
-			if err != nil {
-				return nil, err
-			}
-			set.Add(i)
-			continue
-		}
-
-		start, err := strconv.Atoi(before)
-		if err != nil {
-			return nil, err
-		}
-		end, err := strconv.Atoi(after)
-		if err != nil {
-			return nil, err
-		}
-		for ; start <= end; start++ {
-			set.Add(start)
-		}
+func (g *CRUDGenerator) writeSource(reader io.Reader, filename string) error {
+	file, err := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0644)
+	if err != nil {
+		return errors.Wrapf(err, "open %s failed", filename)
+	}
+	defer file.Close()
+	if _, err = fmt.Fprintf(file, fileHeaderComment); err != nil {
+		return errors.Wrapf(err, "copy file header to %s failed", filename)
+	}
+	if _, err = io.Copy(file, reader); err != nil {
+		return errors.Wrapf(err, "copy source to %s failed", filename)
 	}
 
-	return set.Values(), nil
+	return nil
 }

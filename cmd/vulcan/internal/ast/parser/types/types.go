@@ -2,9 +2,10 @@ package types
 
 import (
 	"encoding/json"
-	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils/sqlutils"
 	"go/ast"
 	"reflect"
+
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils/sqlutils"
 )
 
 type PackageInfo struct {
@@ -124,4 +125,37 @@ func (t *TypeSpec) GetValueType() *TypeSpec {
 	}
 
 	return temp
+}
+
+type Pair[K, V any] struct {
+	Key K
+	Val V
+}
+
+type GenFuncSpec struct {
+	FuncName            string                 // 生成的函数名称
+	KeyFuncName         string                 // 查询生成函数使用
+	WhereColumnNames    []Pair[string, string] // where子句中的条件 key为逻辑条件 AND 或 OR Val为列名
+	SelectColumnNames   []string               // select或set自居中的字段
+	SelectValidateEmpty bool                   // select字句中的列是否需要判空
+	SetValidateEmpty    bool
+}
+
+type ModelSpec struct {
+	ModelName   string // 模型名称
+	TableName   string // 模型对应数据库表名
+	PackageName string // 模型包名
+	FilePath    string // 模型文件路径
+	ImportPath  string // 模型导入路径(在其它包中使用时导入的路径)
+	FuncSpecs   []*GenFuncSpec
+	ModelFields []*ModelField
+	PrimaryKey  *ModelField
+}
+
+type ModelField struct {
+	Name            string // 结构体字段名称
+	Type            string // 结构体字段类型
+	ColumnName      string // 对应表中列名
+	IsPrimaryKey    bool   // 是否是主键
+	IsAutoIncrement bool   // 是否自增
 }

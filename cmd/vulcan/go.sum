@@ -18,8 +18,8 @@ github.com/kr/pretty v0.2.0/go.mod h1:ipq/a2n7PKx3OHsz4KJII5eveXtPO4qwEXGdVfWzfn
 github.com/kr/pty v1.1.1/go.mod h1:pFQYn66WHrOpPYNljwOMqo10TkYh1fy3cYio2l3bCsQ=
 github.com/kr/text v0.1.0 h1:45sCR5RtlFHMR4UwH9sdQ5TC8v0qDQCHnXt+kaKSTVE=
 github.com/kr/text v0.1.0/go.mod h1:4Jbv+DJW3UT/LiOwJeYQe1efqtUx/iVham/4vfdArNI=
-github.com/mangohow/mangokit v1.1.1 h1:FOAK7wAPvf29YmKltJfoekEhMDvQgfSomEn+Obr6tuw=
-github.com/mangohow/mangokit v1.1.1/go.mod h1:JWBenA4VWj/nC9DcGH3nR+l7ga7Nev/SZLo7PLYug1k=
+github.com/mangohow/gowlb v0.0.1 h1:Tmr5Qg4NRq4JcfmCQ0hCKOA3NV/16KHfwdbTprsWv2c=
+github.com/mangohow/gowlb v0.0.1/go.mod h1:4HpweTUwnJk1f7mfgv4Wvf3n8oevemIMtxPNNG9BGq8=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=

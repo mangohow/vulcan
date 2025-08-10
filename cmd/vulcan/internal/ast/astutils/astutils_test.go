@@ -3,7 +3,6 @@ package astutils
 import (
 	"bytes"
 	"fmt"
-	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 	"go/ast"
 	"go/format"
 	"go/parser"
@@ -13,6 +12,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 )
 
 func ParseAst(src, dst string) error {
@@ -40,6 +41,7 @@ func TestParseAst(t *testing.T) {
 		log.Println(err)
 	}
 	ParseAst("../../../../../internal/example/db/mapper/usermapper_gen.go", "usermapper_gen.ast")
+	ParseAst("../../../../../internal/example/model/user.go", "user.ast")
 }
 
 func printSource(node ast.Node) {

@@ -5,7 +5,7 @@ go 1.21.13
 require (
 	github.com/blastrain/vitess-sqlparser v0.0.0-20201030050434-a139afbb1aba
 	github.com/gookit/color v1.5.4
-	github.com/mangohow/mangokit v1.1.1
+	github.com/mangohow/gowlb v0.0.1
 	github.com/spf13/cobra v1.9.1
 	golang.org/x/tools v0.24.0
 )

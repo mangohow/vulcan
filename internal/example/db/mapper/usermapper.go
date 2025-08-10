@@ -1,8 +1,8 @@
 //go:build vulcan
 
+//go:generate ${GOPATH}/bin/vulcan gen db
 package mapper
 
-//go:generate ${GOPATH}/bin/vulcan gen db
 import (
 	"database/sql"
 	"github.com/mangohow/vulcan"
