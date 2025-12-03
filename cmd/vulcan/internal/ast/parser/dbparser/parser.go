@@ -60,7 +60,7 @@ func (p *FileParser) Parse(filename string) (*types.File, error) {
 	source = utils.TrimLineWithPrefix(source, []byte("//go:build "), []byte("// +build"), []byte("//go:generate"))
 	f, err := astparser.ParseFile(p.fst, "", source, astparser.ParseComments)
 	if err != nil {
-		return nil, errors.Errorf("parse file failed, reason: %s", err)
+		return nil, errors.Errorf("parse file %s failed, reason: %s", filename, err)
 	}
 
 	// 处理导入的包

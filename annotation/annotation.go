@@ -20,6 +20,14 @@ func Delete(sql string) string {
 	panic(tip)
 }
 
+func Cacheable(key string, cacheNil bool) {
+	panic(tip)
+}
+
+func CacheEvict(key string, beforeInvocation bool) {
+	panic(tip)
+}
+
 type sqBuilder interface {
 	Stmt(string) sqBuilder
 	Where(cond) sqBuilder
@@ -77,6 +85,7 @@ func Choose() chooseStmt {
 // DeleteBatchIds: 根据主键Id列表删除
 // SelectById: 根据主键Id查询
 // SelectBatchIds: 根据主键Id列表查询
+// SelectAll: 查询全部
 // SelectCount: 查询总数
 // 以下函数需要添加参数, 其中有三种参数：
 //	Where条件参数：该参数用于指定查询时根据哪些列进行查询, 使用AND[]或OR[], 如果两者都有使用|进行分割, 列在中括号中指定, 也可以省略AND, 默认为AND
@@ -86,17 +95,20 @@ func Choose() chooseStmt {
 //				这三种条件可以混用
 //  查询或更新条件参数：该参数用于指定查询时查询出哪些列或者更新时更新哪些列, 使用[], 中括号内部指定索引或名称
 //  查询时或更新时是否判空：该参数为一个bool字面量, 用于指定在查询或更新时是否需要对字段进行判空, 如果为空则不作为查询或更新条件
-// DeleteBy(AND[2-4 6] & OR[7], true): 根据Where条件参数进行删除
+// DeleteBy[2&6]: 根据Where条件参数进行删除
 //
-// UpdateById([2-4 6], true): 根据Id更新指定的列
-// UpdateByXXX([2-4 6], [1], true, true): 根据Where条件参数更新指定的列, 其中XXX后缀可以由用户任意指定, 第一个参数为Where条件参数, 第二个参数为要更新的列, 第三个参数为查询时是否判空, 第四个参数为更新时是否判空
+// UpdateById[2-4,6]: 根据Id更新指定的列
+// UpdateByXXX[2,4,6][1]: 根据Where条件参数更新指定的列, 其中XXX后缀可以由用户任意指定, 第一个参数为Where条件参数, 第二个参数为要更新的列
 //
-// SelectOneByXXX([], [], true): 根据Where条件参数查询指定的一列, 其中XXX后缀可以由用户任意指定, 比如SelectOneByName; 第一个参数为Where条件参数, 第二个参数为要查询的列
-// SelectListByXXX([], [], true): 根据Where条件参数查询指定多列, 其中XXX后缀可以由用户任意指定, 比如SelectListByName; 第一个参数为Where条件参数, 第二个参数为要查询的列
-// SelectCountByXXX([], true): 根据Where条件参数查询数量, 其中XXX后缀可以由用户任意指定, 比如SelectListByName; 第一个参数为Where条件参数
-// SelectPageByXXX([], [], true): 根据Where条件参数分页查询, 其中XXX后缀可以由用户任意指定, 比如SelectListByName; 第一个参数为Where条件参数,  第二个参数为要查询的列
-// 注意： 上面的参数中, 如果有空参数, 则使用[]或false, 不可不写
+// SelectOneByXXX[][]: 根据Where条件参数查询指定的一列, 其中XXX后缀可以由用户任意指定, 比如SelectOneByName; 参数为Where条件参数
+// SelectListByXXX[][]: 根据Where条件参数查询指定多列, 其中XXX后缀可以由用户任意指定, 比如SelectListByName; 第一个参数为Where条件参数, 第二个参数为要查询的列
+// SelectCountByXXX[]: 根据Where条件参数查询数量, 其中XXX后缀可以由用户任意指定, 比如SelectListByName; 参数为Where条件参数
+// SelectPageByXXX[][]: 根据Where条件参数分页查询, 其中XXX后缀可以由用户任意指定, 比如SelectListByName; 第一个参数为Where条件参数,  第二个参数为要查询的列
+// 注意： 上面的参数中, 如果有空参数, 则可以省略[]
 //  	 在生成代码时, 不带参数的函数默认生成, 带参数的函数需要手动指定, 否则不会生成
+// Where条件使用规则： [<字段标识>.[<操作符>][<逻辑运算符>...]]
+//	[4, OR{NE(5), 6}]
+// 支持的逻辑判断： EQ/NE/LT/GT/LE/GE/IN/LIKE/INL/IOL
 
 // updateById中的参数指定需要更新的字段, 使用字段在结构体中的index, 可以使用单数字, 也可以使用index1-index2表示, 闭区间
 // 例如：下面的示例指定了要生成的函数有Add、DeleteById、UpdateById和GetById

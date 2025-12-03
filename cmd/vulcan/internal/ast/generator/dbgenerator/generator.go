@@ -3,7 +3,6 @@ package dbgenerator
 import (
 	"bytes"
 	"fmt"
-	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/astutils"
 	"go/ast"
 	"go/format"
 	"go/token"
@@ -14,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/astutils"
 
 	"github.com/mangohow/gowlb/tools/collection"
 	"github.com/mangohow/gowlb/tools/stream"

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"text/template"
 
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
 )
@@ -46,6 +47,17 @@ func Contains[T comparable](ss []T, s T) bool {
 
 	return false
 }
+
+func ContainsPrefix(ss []string, s string) bool {
+	for i := range ss {
+		if strings.HasPrefix(s, ss[i]) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func GetPackageName(pkgPath string) string {
 	idx := strings.LastIndex(pkgPath, "/")
 	if idx == -1 {
@@ -206,9 +218,9 @@ func GetPackageNameByDir(dir string) (string, error) {
 	return packageName, nil
 }
 
-// 获取系统go版本, 只返回.之后的数字, 比如 1.18则返回18
+// 获取系统go版本, 只返回子版本号, 比如 1.18则返回18
 // 如果获取失败, 默认为1.18
-func GetSystemGoVersion() int {
+func GetSystemGoSubVersion() int {
 	const defaultVersion = 18
 	cmd := exec.Command("go", "version")
 	var out bytes.Buffer
@@ -237,4 +249,29 @@ func GetSystemGoVersion() int {
 	}
 
 	return n
+}
+
+func ExecuteTemplate(name string, tmpl string, data any) (string, error) {
+	parser, err := template.New(name).Parse(tmpl)
+	if err != nil {
+		return "", err
+	}
+	buffer := &strings.Builder{}
+	if err = parser.Execute(buffer, data); err != nil {
+		return "", err
+	}
+	return buffer.String(), nil
+}
+
+func FormatGoSourceDir(dir string) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	if err = os.Chdir(dir); err != nil {
+		return
+	}
+	defer os.Chdir(cwd)
+
+	exec.Command("go", "fmt", "./...").Run()
 }

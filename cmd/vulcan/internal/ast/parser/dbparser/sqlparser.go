@@ -229,7 +229,7 @@ func ParseCreationFields(stmt *sqlparser.CreateTable) *TableSpec {
 		if index != -1 {
 			typeName = def.Type[:index]
 		}
-		if items[1] == "unsigned" {
+		if len(items) > 1 && items[1] == "unsigned" {
 			typeName += " unsigned"
 		}
 		c := &TableColumn{

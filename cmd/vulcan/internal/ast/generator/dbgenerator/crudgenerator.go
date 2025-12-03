@@ -12,16 +12,7 @@ import (
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/command"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils"
-)
-
-type CRUDGenFunc func(spec *types.ModelSpec, options *CommonOptions) (string, error)
-
-var ( // TODO
-	crudGenFuncMapping = map[string]CRUDGenFunc{
-		"Add": func(modelSpec *types.ModelSpec, options *CommonOptions) (string, error) {
-			return "", nil
-		},
-	}
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils/stringutils"
 )
 
 type CRUDGenerator struct {
@@ -36,13 +27,15 @@ func NewCRUDGenerator(options *command.CommandOptions, modelSpecs []*types.Model
 		modelSpecs: modelSpecs,
 		importPackages: []string{
 			`"database/sql"`,
-			`"github.com/mangohow/vulcan"`,
 			`. "github.com/mangohow/vulcan/annotation"`,
 		},
 	}
 }
 
-func (g *CRUDGenerator) Execute() error {
+func (g *CRUDGenerator) Execute() ([]string, error) {
+	if len(g.modelSpecs) == 0 {
+		return nil, fmt.Errorf("modelSpecs is empty")
+	}
 	return g.generateCRUDFuncsByModel()
 }
 
@@ -52,11 +45,11 @@ func (g *CRUDGenerator) generateCRUDFunc(modelSpec *types.ModelSpec, funcSpec *t
 		return "", errors.Errorf("gen func %s is invalid", funcSpec.FuncName)
 	}
 
-	return fn(modelSpec, commonOptions)
+	return fn(modelSpec, funcSpec, commonOptions)
 }
 
 // 根据model生成中间代码
-func (g *CRUDGenerator) generateCRUDFuncsByModel() error {
+func (g *CRUDGenerator) generateCRUDFuncsByModel() ([]string, error) {
 	// 获取mapper的包名
 	outputPath := g.options.OutPutPath
 	if strings.HasSuffix(outputPath, ".go") {
@@ -64,17 +57,25 @@ func (g *CRUDGenerator) generateCRUDFuncsByModel() error {
 	}
 	packageName, err := utils.GetPackageNameByDir(outputPath)
 	if err != nil {
-		return errors.Wrapf(err, "get mapper package name failed")
+		return nil, errors.Wrapf(err, "get mapper package name failed")
 	}
+	files := make([]string, 0, len(g.modelSpecs))
 	for _, modelSpec := range g.modelSpecs {
 		modelObjName := strings.ToLower(modelSpec.ModelName[:1]) + modelSpec.ModelName[1:]
 		modelTypeName := modelSpec.PackageName + "." + modelSpec.ModelName
+		mapperName := strings.ToUpper(modelSpec.ModelName[:1]) + modelSpec.ModelName[1:]
+		if g.options.ModelSuffix != "" {
+			mapperName, _, _ = strings.Cut(mapperName, stringutils.UpperFirstLittle(g.options.ModelSuffix))
+		}
 		commonOptions := &CommonOptions{
-			MapperName:    strings.ToUpper(modelSpec.ModelName[:1]) + modelSpec.ModelName[1:] + g.options.RepoSuffix,
+			MapperName:    mapperName + g.options.RepoSuffix,
 			ReceiverName:  strings.ToLower(modelSpec.ModelName[:1]),
 			ModelObjName:  modelObjName,
 			ModelTypeName: modelTypeName,
 			TableName:     modelSpec.TableName,
+		}
+		if modelSpec.PrimaryKey != nil {
+			commonOptions.PrimaryKey = modelSpec.PrimaryKey.ColumnName
 		}
 
 		buffer := bytes.NewBuffer(nil)
@@ -86,14 +87,15 @@ func (g *CRUDGenerator) generateCRUDFuncsByModel() error {
 		// 写入package
 		buffer.WriteString("package ")
 		buffer.WriteString(packageName)
-		buffer.WriteString("\n")
+		buffer.WriteString("\n\n")
 		// 写入import
 		buffer.WriteString("import (\n")
 		for _, imp := range g.importPackages {
+			buffer.WriteString("    ")
 			buffer.WriteString(imp)
 			buffer.WriteString("\n")
 		}
-		buffer.WriteString(fmt.Sprintf("%q\n)\n\n", modelSpec.ImportPath))
+		buffer.WriteString(fmt.Sprintf("    %q\n)\n\n", modelSpec.ImportPath))
 		// 写入结构体声明
 		buffer.WriteString(fmt.Sprintf("type %s struct {\n\tdb *sql.DB\n}\n\n", commonOptions.MapperName))
 		// 写入结构体构造函数
@@ -102,23 +104,21 @@ func (g *CRUDGenerator) generateCRUDFuncsByModel() error {
 		for _, curdFnSpec := range modelSpec.FuncSpecs {
 			source, err := g.generateCRUDFunc(modelSpec, curdFnSpec, commonOptions)
 			if err != nil {
-				return err
+				return nil, err
 			}
 
 			buffer.WriteString(source)
-			buffer.WriteString("\n")
+			buffer.WriteString("\n\n")
 		}
 
-		outputPath = g.options.OutPutPath
-		if !strings.HasSuffix(outputPath, ".go") {
-			outputPath = filepath.Join(outputPath, strings.ToLower(commonOptions.MapperName)+".go")
-		}
-		if err := g.writeSource(buffer, outputPath); err != nil {
-			return errors.Wrapf(err, "write source failed")
+		filename := filepath.Join(outputPath, strings.ToLower(commonOptions.MapperName)+".go")
+		files = append(files, filename)
+		if err := g.writeSource(buffer, filename); err != nil {
+			return nil, errors.Wrapf(err, "write source failed")
 		}
 	}
 
-	return nil
+	return files, nil
 }
 
 func (g *CRUDGenerator) writeSource(reader io.Reader, filename string) error {

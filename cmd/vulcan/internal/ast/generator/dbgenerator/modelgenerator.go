@@ -5,12 +5,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
+
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/log"
 
 	"github.com/mangohow/gowlb/tools/collection"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/dbparser"
-	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/command"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils"
@@ -103,36 +103,12 @@ var (
 		"timestamp": "NullInt64",
 		"year":      "NullInt16",
 	}
+)
 
-	goTypeToReflectKindMapping = map[string]reflect.Kind{
-		"int":   reflect.Int,
-		"int8":  reflect.Int8,
-		"int16": reflect.Int16,
-		"int32": reflect.Int32,
-		"int64": reflect.Int64,
-
-		"uint":   reflect.Uint,
-		"uint8":  reflect.Uint8,
-		"uint16": reflect.Uint16,
-		"uint32": reflect.Uint32,
-
-		"float32": reflect.Float32,
-		"float64": reflect.Float64,
-
-		"string": reflect.String,
-		"[]byte": reflect.Slice,
-
-		"sql.NullInt64":   reflect.Struct,
-		"sql.NullInt32":   reflect.Struct,
-		"sql.NullInt16":   reflect.Struct,
-		"sql.NullFloat64": reflect.Struct,
-		"sql.NullString":  reflect.Struct,
-		"sql.NullByte":    reflect.Struct,
-		"sql.NullTime":    reflect.Struct,
-		"sql.NullBool":    reflect.Struct,
-
-		"sql.Null": reflect.Struct,
-	}
+const (
+	primaryTag            = "pk"
+	autoincrementTag      = "auto_incr"
+	tablePropertyTypeName = "annotation.TableProperty"
 )
 
 func getGoTypeFromSqlType(sqlType string, useNull bool) (string, error) {
@@ -142,7 +118,7 @@ func getGoTypeFromSqlType(sqlType string, useNull bool) (string, error) {
 	)
 
 	// go版本>=1.22时, 可以使用sql.Null
-	version := utils.GetSystemGoVersion()
+	version := utils.GetSystemGoSubVersion()
 	if useNull && version >= 22 {
 		res, ok = sqlColumnToGoTypeMapping[sqlType]
 		if !ok {
@@ -228,26 +204,24 @@ type ModelGenOptions struct {
 	TagKeys     []string // 需要附加的结构体tag
 }
 
-func GenerateGoModelStructList(specList []*dbparser.TableSpec, options *command.CommandOptions, modelGenOptions *ModelGenOptions) ([]*types.TypeSpec, error) {
+func GenerateGoModelStructList(specList []*dbparser.TableSpec, options *command.CommandOptions, modelGenOptions *ModelGenOptions) error {
 	srcBuilder := strings.Builder{}
 	srcBuilder.Grow(4 << 10)
 	importSet := collection.NewSet[string]()
-	importSet.Add("github.com/mangohow/vulcan")
-	res := make([]*types.TypeSpec, 0, len(specList))
+	importSet.Add("github.com/mangohow/vulcan/annotation")
 	for _, spec := range specList {
 		modelDetails, err := GenerateGoModelStruct(spec, modelGenOptions)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		srcBuilder.WriteString(modelDetails.Source)
 		srcBuilder.WriteByte('\n')
 		importSet.Adds(modelDetails.Imports...)
-		res = append(res, modelDetails.Type)
 	}
 
 	modelOutputPath, err := filepath.Abs(options.ModelOutputPath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "get model abs path failed")
+		return errors.Wrapf(err, "get model abs path failed")
 	}
 	var (
 		modelFileName = modelOutputPath
@@ -267,24 +241,25 @@ func GenerateGoModelStructList(specList []*dbparser.TableSpec, options *command.
 	}
 	exists, err := utils.IsDirExists(modelFilePath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "stat %s error", modelFilePath)
+		return errors.Wrapf(err, "stat %s error", modelFilePath)
 	}
 	if !exists {
 		if err = os.MkdirAll(modelFilePath, 0644); err != nil {
-			return nil, errors.Wrapf(err, "mkdir %s error", modelFilePath)
+			return errors.Wrapf(err, "mkdir %s error", modelFilePath)
 		}
 	} else {
 		// 获取包名
 		packageName, err = utils.GetPackageNameByDir(modelFilePath)
 		if err != nil {
-			return nil, errors.Wrapf(err, "get model package name failed")
+			return errors.Wrapf(err, "get model package name failed")
 		}
 	}
 
+	options.File = modelFileName
 	// 写入生成的代码
 	file, err := os.OpenFile(modelFileName, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0644)
 	if err != nil {
-		return nil, errors.Wrapf(err, "open file %s failed", modelFileName)
+		return errors.Wrapf(err, "open file %s failed", modelFileName)
 	}
 	defer file.Close()
 
@@ -299,65 +274,17 @@ func GenerateGoModelStructList(specList []*dbparser.TableSpec, options *command.
 	}
 	fmt.Fprintf(file, srcBuilder.String())
 
+	log.Infof("Generate go file %s!", modelFileName)
 	// 格式化代码
-	exec.Command("go", "fmt", modelFileName).Run()
-
-	return res, nil
-}
-
-func GenerateTypeSpecs(modelSpec *ModelSpec) (*types.TypeSpec, error) {
-	typeSpec := &types.TypeSpec{
-		Name: modelSpec.ModelStructName,
-		Kind: reflect.Struct,
-		Fields: []*types.Param{
-			{
-				Type: types.TypeSpec{
-					Name: "TableProperty",
-					Package: &types.PackageInfo{
-						PackageName: corePackageName,
-						PackagePath: corePackagePath,
-					},
-					Tag:  reflect.StructTag(modelSpec.Fields[0].Tag()),
-					Kind: reflect.Struct,
-				},
-			},
-		},
+	output, err := exec.Command("go", "fmt", modelFileName).CombinedOutput()
+	if err != nil {
+		return errors.Wrapf(err, "format source file %s failed, error info: %s", modelFileName, output)
 	}
 
-	for _, field := range modelSpec.Fields {
-		sf := &types.Param{
-			Name: field.Name,
-			Type: types.TypeSpec{
-				Name:    field.Type,
-				Package: nil,
-				Tag:     reflect.StructTag(field.Tag()),
-				Kind:    0,
-			},
-		}
-		if field.Type == "time.Time" {
-			sf.Type.Kind = reflect.Struct
-			sf.Type.Package = &types.PackageInfo{
-				PackageName: "time",
-				PackagePath: "time",
-			}
-		} else if strings.HasPrefix(field.Type, "sql.") {
-			sf.Type.Kind = reflect.Struct
-			sf.Type.Package = &types.PackageInfo{
-				PackageName: "sql",
-			}
-		} else {
-			// TODO
-			sf.Type.Kind = goTypeToReflectKindMapping[field.Type]
-		}
-
-		typeSpec.Fields = append(typeSpec.Fields, sf)
-	}
-
-	return typeSpec, nil
+	return nil
 }
 
 type ModelStructDetails struct {
-	Type    *types.TypeSpec
 	Source  string
 	Imports []string
 }
@@ -379,7 +306,12 @@ func GenerateGoModelStruct(spec *dbparser.TableSpec, modelGenOptions *ModelGenOp
 		return nil, err
 	}
 	// 写入TableProperty
-	builder.WriteString(fmt.Sprintf("\tvulcan.TableProperty `tableName:\"%s\" gen:\"%s\"`\n", spec.TableName, strings.Join(spec.GenFuncList, "|")))
+	if len(spec.GenFuncList) > 0 {
+		builder.WriteString(fmt.Sprintf("\t%s `tableName:\"%s\" gen:\"%s\"`\n\n", tablePropertyTypeName, spec.TableName, strings.Join(spec.GenFuncList, "|")))
+	} else {
+		builder.WriteString(fmt.Sprintf("\t%s `tableName:\"%s\"`\n\n", tablePropertyTypeName, spec.TableName))
+	}
+
 	for _, field := range modelSpec.Fields {
 		builder.WriteString("\t")
 		builder.WriteString(field.Name)
@@ -391,25 +323,21 @@ func GenerateGoModelStruct(spec *dbparser.TableSpec, modelGenOptions *ModelGenOp
 	}
 	builder.WriteString("}\n")
 
-	typeSpec, err := GenerateTypeSpecs(modelSpec)
-	if err != nil {
-		return nil, err
-	}
-
 	return &ModelStructDetails{
-		Type:    typeSpec,
+		//Type:    typeSpec,
 		Source:  builder.String(),
 		Imports: modelSpec.GetImports(),
 	}, nil
 }
 
 func convertToModelSpec(spec *dbparser.TableSpec, modelGenOptions *ModelGenOptions) (*ModelSpec, error) {
+	tablePrefix := strings.Trim(modelGenOptions.TablePrefix, "_")
 	parts := strings.Split(spec.TableName, "_")
-	if len(parts) > 0 && parts[0] == modelGenOptions.TablePrefix {
+	if len(parts) > 0 && parts[0] == tablePrefix {
 		parts = parts[1:]
 	}
 	modelSpec := &ModelSpec{
-		ModelStructName: stringutils.ToPascalCaseByList(parts) + modelGenOptions.ModelSuffix,
+		ModelStructName: stringutils.ToPascalCaseByList(parts) + stringutils.UpperFirstLittle(modelGenOptions.ModelSuffix),
 	}
 
 	for _, col := range spec.Columns {
@@ -430,16 +358,16 @@ func convertToModelSpec(spec *dbparser.TableSpec, modelGenOptions *ModelGenOptio
 
 		dbTagVal := col.Name
 		if col.IsPrimaryKey {
-			dbTagVal += ",pk"
+			dbTagVal += ("," + primaryTag)
 		}
 		if col.IsAutoIncrement {
-			dbTagVal += ",auto_incr"
+			dbTagVal += ("," + autoincrementTag)
 		}
 		modelFieldSpec.AddTag("db", dbTagVal)
 
 		for _, key := range modelGenOptions.TagKeys {
 			if key != "" {
-				modelFieldSpec.AddTag(key, modelFieldSpec.Name)
+				modelFieldSpec.AddTag(key, stringutils.LowerFirstLittle(modelFieldSpec.Name))
 			}
 		}
 
@@ -449,6 +377,7 @@ func convertToModelSpec(spec *dbparser.TableSpec, modelGenOptions *ModelGenOptio
 	return modelSpec, nil
 }
 
+// TODO
 func validateGenFuncList(fns []string) error {
-
+	return nil
 }

@@ -6,15 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils"
+
 	"github.com/mangohow/gowlb/tools/stream"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/generator/dbgenerator"
 	parser2 "github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/dbparser"
-	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/command"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
 	"github.com/mangohow/vulcan/cmd/vulcan/internal/log"
-	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -35,14 +35,20 @@ var (
 		Run: func(cmd *cobra.Command, args []string) {
 			options := parseCommandArgs(cmd)
 			if options.DDLGen {
-				if err := generateMapperBySqlDDL(options); err != nil {
+				// 生成结构体
+				if err := generateModelStructBySqlDDL(options); err != nil {
+					log.Fatalf("%v", err)
+				}
+
+				// 生成mapper代码
+				if err := generateMapperByStructModel(options); err != nil {
 					log.Fatalf("%v", err)
 				}
 				return
 			}
 
 			if options.StructGen {
-				if err := generateMapperByStructModel(options, nil); err != nil {
+				if err := generateMapperByStructModel(options); err != nil {
 					log.Fatalf("%v", err)
 				}
 				return
@@ -55,67 +61,49 @@ var (
 	}
 )
 
-func generateMapperByStructModel(options *command.CommandOptions, modelSpecs []*types.ModelSpec) (err error) {
-	if modelSpecs == nil {
-		fst := token.NewFileSet()
-		dependencyManager := parser2.NewDependencyManager(fst)
-		parser := dbparser.NewModelStructParser(fst, dependencyManager, options)
-		// 解析model struct
-		modelSpecs, err = parser.Parse()
-		if err != nil {
-			return err
-		}
+func generateMapperByStructModel(options *command.CommandOptions) error {
+	fst := token.NewFileSet()
+	dependencyManager := parser2.NewDependencyManager(fst)
+	parser := dbparser.NewModelStructParser(fst, dependencyManager, options)
+	// 解析model struct
+	modelSpecs, err := parser.Parse()
+	if err != nil {
+		return err
 	}
 
 	// 生成中间代码
 	generator := dbgenerator.NewCRUDGenerator(options, modelSpecs)
-	if err := generator.Execute(); err != nil {
-		return err
-	}
-
-	return nil
-
-	source, err := dbgenerator.GenerateCRUDFuncsByModel(modelSpecs, options)
+	files, err := generator.Execute()
 	if err != nil {
 		return err
 	}
-	_ = source
-	// TODO  写入package、 go generate等
-	sourcePath := options.OutPutPath
-	sourcePath, err = filepath.Abs(sourcePath)
-	if err != nil {
-		return errors.Wrapf(err, "get abs output path failed")
+
+	if len(files) == 0 {
+		return nil
 	}
-	exist, err := utils.IsDirExists(sourcePath)
-	if err != nil {
-		return errors.Wrapf(err, "stat %s failed", sourcePath)
+
+	// 删除中间代码
+	if !options.IntermediateCode {
+		defer func() {
+			for _, file := range files {
+				_ = os.Remove(file)
+			}
+		}()
+	} else {
+		utils.FormatGoSourceDir(filepath.Dir(files[0]))
 	}
-	if !exist {
-		if err = os.MkdirAll(sourcePath, 0644); err != nil {
-			return errors.Wrapf(err, "mkdir %s error", sourcePath)
+
+	// 生成最终mapper代码
+	for _, file := range files {
+		if err := generateMapper(file); err != nil {
+			return err
 		}
 	}
 
-	filename := filepath.Base(options.File)
-	index := strings.LastIndex(filename, ".")
-	if index != -1 {
-		filename = filename[:index]
-	}
-	filename = filepath.Join(sourcePath, filename+".go")
-	if err = os.WriteFile(filename, nil, 0644); err != nil {
-		return errors.Wrapf(err, "write source to %s failed", filename)
-	}
-
-	// 如果不需要保留中间代码, 则需要删除
-	if !options.IntermediateCode {
-		defer os.Remove(filename)
-	}
-
-	// 根据中间代码生成最终代码
-	return generateMapper(filename)
+	return nil
 }
 
-func generateMapperBySqlDDL(options *command.CommandOptions) error {
+func generateModelStructBySqlDDL(options *command.CommandOptions) error {
 	if options.File == "" {
 		return errors.Errorf("source file is not specified")
 	}
@@ -147,12 +135,12 @@ func generateMapperBySqlDDL(options *command.CommandOptions) error {
 		TagKeys:     tags,
 	}
 	// 生成model文件
-	modelTypes, err := dbgenerator.GenerateGoModelStructList(ddlSpecs, options, genOptions)
+	err = dbgenerator.GenerateGoModelStructList(ddlSpecs, options, genOptions)
 	if err != nil {
 		return err
 	}
 
-	return generateMapperByStructModel(options, modelTypes)
+	return nil
 }
 
 func init() {
@@ -178,7 +166,24 @@ func parseCommandArgs(cmd *cobra.Command) *command.CommandOptions {
 		options.File = filepath.Join(dir, goSourceFile)
 	}
 
+	// 将路径都转换为绝对路径
+	options.Dir = absPathHelper(options.Dir)
+	options.OutPutPath = absPathHelper(options.OutPutPath)
+	options.ModelOutputPath = absPathHelper(options.ModelOutputPath)
+
 	return options
+}
+
+func absPathHelper(path string) string {
+	if path == "" {
+		return ""
+	}
+	path, err := filepath.Abs(path)
+	if err != nil {
+		log.Fatalf("get abs path error, err: %v", err)
+	}
+
+	return path
 }
 
 func main() {
@@ -196,7 +201,7 @@ func generateMapper(path string) error {
 		return errors.Wrapf(err, "parse file %s failed", path)
 	}
 
-	idx := strings.Index(path, ".")
+	idx := strings.LastIndex(path, ".")
 	newFileName := path[:idx] + "_gen" + path[idx:]
 	generator := dbgenerator.NewFileGenerator(parsedFile)
 	if err := generator.Execute(newFileName); err != nil {

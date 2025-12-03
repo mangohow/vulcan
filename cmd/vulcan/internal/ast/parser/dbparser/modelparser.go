@@ -1,6 +1,15 @@
 package dbparser
 
 import (
+	"fmt"
+	"github.com/mangohow/gowlb/tools/collection"
+	"github.com/mangohow/gowlb/tools/stream"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/command"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils/stringutils"
 	"go/ast"
 	astparser "go/parser"
 	"go/token"
@@ -10,53 +19,14 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-
-	"github.com/mangohow/gowlb/tools/collection"
-	"github.com/mangohow/gowlb/tools/stream"
-	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser"
-	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
-	"github.com/mangohow/vulcan/cmd/vulcan/internal/command"
-	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
-	"github.com/mangohow/vulcan/cmd/vulcan/internal/utils"
 )
 
 const (
 	tablePropertyName     = "TableProperty"
-	annotationPackageName = "vulcan"
+	annotationPackageName = "annotation"
 
 	tableNameKey = "tableName"
 	genKey       = "gen"
-)
-
-var (
-	supportedColumnType = []string{
-		"int",
-		"int64",
-		"int32",
-		"int16",
-		"int8",
-		"uint",
-		"uint64",
-		"uint32",
-		"uint16",
-		"uint8",
-		"float64",
-		"float32",
-		"string",
-		"bool",
-		"[]byte",
-		"time.Time",
-		"sql.NullTime",
-		"sql.NullInt64",
-		"sql.NullInt32",
-		"sql.NullInt16",
-		"sql.NullFloat64",
-		"sql.NullBool",
-		"sql.NullString",
-		"sql.NullByte",
-		"sql.Null",
-		"sql.RawBytes",
-	}
 )
 
 type ModelStructParser struct {
@@ -85,15 +55,16 @@ func (p *ModelStructParser) Parse() ([]*types.ModelSpec, error) {
 	source = utils.TrimLineWithPrefix(source, []byte("//go:build "), []byte("// +build"), []byte("//go:generate"))
 	f, err := astparser.ParseFile(p.fst, "", source, astparser.ParseComments)
 	if err != nil {
-		return nil, errors.Errorf("parse file failed, reason: %s", err)
+		return nil, errors.Errorf("parse source file failed, reason: %s", err)
 	}
 
-	// 检查是否导入了必要的包
 	packageInfo := parseImports(f, p.options.File)
+	// 检查是否导入了必要的包
 	if err := checkNecessaryPackageImport(p.necessaryPackages, packageInfo.Imports); err != nil {
 		return nil, err
 	}
 
+	// 过滤合法的结构体model声明
 	astTypeSpecs := make([]*ast.TypeSpec, 0)
 	for _, decl := range f.Decls {
 		genDecl, ok := decl.(*ast.GenDecl)
@@ -113,7 +84,7 @@ func (p *ModelStructParser) Parse() ([]*types.ModelSpec, error) {
 			}
 
 			// 未导出的
-			if !(ts.Name.Name[0] >= 'A' && ts.Name.Name[0] <= 'Z') {
+			if !stringutils.IsUpperLetter(ts.Name.Name[:1]) {
 				continue
 			}
 
@@ -138,13 +109,13 @@ func (p *ModelStructParser) Parse() ([]*types.ModelSpec, error) {
 
 	modelSpecList := make([]*types.ModelSpec, 0, len(astTypeSpecs))
 	for _, astTypeSpec := range astTypeSpecs {
-		modelSpce, err := p.parseStructDecls(astTypeSpec)
+		modelSpec, err := p.parseStructDecls(astTypeSpec)
 		if err != nil && err != IgnoreError {
 			return nil, errors.Wrapf(err, "parse model %s failed", astTypeSpec.Name.Name)
 		}
 
 		if err != IgnoreError {
-			modelSpecList = append(modelSpecList, modelSpce)
+			modelSpecList = append(modelSpecList, modelSpec)
 		}
 	}
 
@@ -152,7 +123,7 @@ func (p *ModelStructParser) Parse() ([]*types.ModelSpec, error) {
 }
 
 var (
-	IgnoreError = errors.Errorf("ignore it")
+	IgnoreError = errors.Errorf("no error")
 )
 
 func (p *ModelStructParser) parseStructDecls(typeSpec *ast.TypeSpec) (*types.ModelSpec, error) {
@@ -182,7 +153,7 @@ func (p *ModelStructParser) parseStructDecls(typeSpec *ast.TypeSpec) (*types.Mod
 	}
 
 	if field0.Tag == nil || field0.Tag.Value == "" {
-		return nil, errors.Errorf("The tag in the TableProperty field of the model struct %s is incorrect", modelSpec.ModelName)
+		return nil, errors.Errorf("The tag in the TableProperty field of the model struct %s is null", modelSpec.ModelName)
 	}
 
 	// 先解析model中对应数据库的字段
@@ -228,6 +199,7 @@ func (p *ModelStructParser) parseColumns(modelName string, fields []*ast.Field) 
 			Name: field.Names[0].Name,
 		}
 
+		isGenericType := false
 		switch ft := field.Type.(type) {
 		case *ast.Ident:
 			res.Type = ft.Name
@@ -238,13 +210,45 @@ func (p *ModelStructParser) parseColumns(modelName string, fields []*ast.Field) 
 				return nil
 			}
 			res.Type = ident.Name + "." + ft.Sel.Name
+		case *ast.ArrayType:
+			ident, ok := ft.Elt.(*ast.Ident)
+			if !ok || ident.Name != "byte" {
+				err = errors.Errorf("invalid type in field %s", res.Name)
+				return nil
+			}
+			res.Type = "[]byte"
+		case *ast.IndexExpr: // 泛型类型
+			isGenericType = true
+			selector, ok := ft.X.(*ast.SelectorExpr)
+			if !ok {
+				err = errors.Errorf("invalid type in field %s", res.Name)
+				return nil
+			}
+			if x, ok := selector.X.(*ast.Ident); !ok || x.Name != "sql" || selector.Sel.Name != "Null" {
+				err = errors.Errorf("invalid type in field %s", res.Name)
+				return nil
+			}
+			switch indexName := ft.Index.(type) {
+			case *ast.SelectorExpr:
+				x, ok := indexName.X.(*ast.Ident)
+				if !ok {
+					err = errors.Errorf("invalid type in field %s", res.Name)
+					return nil
+				}
+				res.Type = fmt.Sprintf("sql.Null[%s.%s]", x.Name, indexName.Sel.Name)
+			case *ast.Ident:
+				res.Type = fmt.Sprintf("sql.Null[%s]", indexName.Name)
+			default:
+				err = errors.Errorf("invalid type in field %s", res.Name)
+				return nil
+			}
 		default:
 			err = errors.Errorf("type invalid, model struct %s, field name %s", modelName, res.Name)
 			return nil
 		}
 
 		// 对Type进行校验
-		if !utils.Contains(supportedColumnType, res.Type) {
+		if !types.IsTypeSupported(res.Type, isGenericType) {
 			err = errors.Errorf("type %s of field %s is not supported in model struct %s", res.Type, res.Name, modelName)
 			return nil
 		}
@@ -257,7 +261,7 @@ func (p *ModelStructParser) parseColumns(modelName string, fields []*ast.Field) 
 		structTag := reflect.StructTag(strings.Trim(field.Tag.Value, "`"))
 		dbTag := structTag.Get("db")
 		if dbTag == "" {
-			err = errors.Errorf("field %s has no db tag", res.Name)
+			err = errors.Errorf("field %s has empty db tag", res.Name)
 			return nil
 		}
 
@@ -288,7 +292,7 @@ func (p *ModelStructParser) parseColumns(modelName string, fields []*ast.Field) 
 
 var (
 	defaultGenFuncs = []string{
-		"Add", "AddBatch", "SelectCount", "DeleteById", "DeleteBatchIds", "SelectById", "SelectBatchIds",
+		"Add", "AddBatch", "SelectCount", "SelectAll", "DeleteById", "DeleteBatchIds", "SelectById", "SelectBatchIds",
 	}
 )
 
@@ -301,7 +305,20 @@ func (p *ModelStructParser) parseTablePropertyTag(tag, modelName string, modelFi
 	}
 	genTag := propertyTag.Get(genKey)
 	if genTag == "" {
-		return tabName, nil, nil
+		// 添加默认生成的CRUD函数
+		defaultGen := defaultGenFuncs
+		if !hasPrimaryKey {
+			defaultGen = defaultGenFuncs[:3]
+		}
+		res := make([]*types.GenFuncSpec, 0, len(defaultGen))
+		for _, name := range defaultGen {
+			res = append(res, &types.GenFuncSpec{
+				FuncName:    name,
+				KeyFuncName: name,
+			})
+		}
+
+		return tabName, res, nil
 	}
 
 	genFunDecls := strings.Split(genTag, "|")
@@ -311,7 +328,7 @@ func (p *ModelStructParser) parseTablePropertyTag(tag, modelName string, modelFi
 		funcName, argStr, found := strings.Cut(genFunDecl, "(")
 		if !found {
 			switch funcName {
-			case "Add", "AddBatch", "SelectCount":
+			case "Add", "AddBatch", "SelectCount", "SelectAll":
 			case "DeleteById", "DeleteBatchIds", "SelectById", "SelectBatchIds":
 				if !hasPrimaryKey {
 					return "", nil, errors.Errorf("model %s has no primary key field, can not generate funcs select by id", modelName)
@@ -339,10 +356,10 @@ func (p *ModelStructParser) parseTablePropertyTag(tag, modelName string, modelFi
 		)
 		switch {
 		case funcName == "DeleteBy":
-			if len(args) != 2 {
-				return "", nil, errors.Errorf("DeleteBy must have 2 parameters")
+			if len(args) != 1 {
+				return "", nil, errors.Errorf("DeleteBy must have 1 parameters")
 			}
-			genFuncSpec, err = p.parseGenFuncArgs(args[0], "", args[1], "", modelFields)
+			genFuncSpec, err = p.parseGenFuncArgs(args[0], "", "", "", modelFields)
 		case funcName == "UpdateById":
 			if len(args) != 2 {
 				return "", nil, errors.Errorf("UpdateById must have 2 parameters")
@@ -467,13 +484,30 @@ func (p *ModelStructParser) parseGenFuncArgs(whereArg, selectArg, selectValidate
 func parseIndexToColumnName(indexes []string, op, key string, set collection.Set[types.Pair[string, string]], modelFields []*types.ModelField) error {
 	for _, index := range indexes {
 		startEnd := strings.Split(index, "-")
-		if len(startEnd) == 2 {
+		if ranged := (len(startEnd) == 1 && strings.Contains(index, "-")); len(startEnd) == 2 || ranged {
 			start, err1 := strconv.Atoi(startEnd[0])
-			end, err2 := strconv.Atoi(startEnd[1])
-			if err1 != nil || err2 != nil {
-				return errors.Errorf("invalid %s arg index", op)
+			var (
+				end  = len(modelFields) - 1
+				err2 error
+			)
+			if !ranged {
+				end, err2 = strconv.Atoi(startEnd[1])
 			}
-			if start < 0 || start >= len(modelFields) || start > end || end <= len(modelFields) {
+			// 可能是字段名, 找到对应的索引
+			if err1 != nil {
+				start = findIndexByName(startEnd[0], modelFields)
+				if start == -1 {
+					return errors.Errorf("invalid %s arg index", op)
+				}
+			}
+			if err2 != nil {
+				end = findIndexByName(startEnd[1], modelFields)
+				if end == -1 {
+					return errors.Errorf("invalid %s arg index", op)
+				}
+			}
+
+			if start < 0 || start >= len(modelFields) || start > end || end >= len(modelFields) {
 				return errors.Errorf("invalid %s arg index", op)
 			}
 
@@ -484,14 +518,10 @@ func parseIndexToColumnName(indexes []string, op, key string, set collection.Set
 		}
 		idx, err := strconv.Atoi(index)
 		if err != nil {
-			filtered := stream.Filter(modelFields, func(field *types.ModelField) bool {
-				return field.Name == index || field.ColumnName == index
-			})
-			if len(filtered) == 0 {
+			idx = findIndexByName(index, modelFields)
+			if idx == -1 {
 				return errors.Errorf("invalid %s arg %s", op, index)
 			}
-			set.Add(types.Pair[string, string]{key, filtered[0].ColumnName})
-			continue
 		}
 		if idx < 0 || idx >= len(modelFields) {
 			return errors.Errorf("invalid %s arg %s", op, index)
@@ -502,6 +532,16 @@ func parseIndexToColumnName(indexes []string, op, key string, set collection.Set
 	return nil
 }
 
+func findIndexByName(name string, modelFields []*types.ModelField) int {
+	for i, field := range modelFields {
+		if name == field.Name || name == field.ColumnName {
+			return i
+		}
+	}
+
+	return -1
+}
+
 func (p *ModelStructParser) fillMoreInfo(spec *types.ModelSpec) error {
 	modelFile := p.options.File
 	abs, err := filepath.Abs(modelFile)
@@ -510,6 +550,7 @@ func (p *ModelStructParser) fillMoreInfo(spec *types.ModelSpec) error {
 	}
 
 	modelDir := filepath.Dir(abs)
+	// 获取model的包名
 	packageName, err := utils.GetPackageNameByDir(modelDir)
 	if err != nil {
 		return errors.Wrapf(err, "get model package name error")
@@ -518,7 +559,7 @@ func (p *ModelStructParser) fillMoreInfo(spec *types.ModelSpec) error {
 	spec.PackageName = packageName
 	spec.FilePath = abs
 
-	// 获取包导入路径
+	// 获取model包导入路径
 	cwd, err := os.Getwd()
 	if err != nil {
 		return errors.Wrapf(err, "get working dir error")

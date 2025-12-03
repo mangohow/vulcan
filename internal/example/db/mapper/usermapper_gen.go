@@ -43,12 +43,14 @@ type TestStruct2 struct {
 }
 
 type UserMapper struct {
-	db *sql.DB
+	db           *sql.DB
+	cacheManager vulcan.CacheManger[model.User]
 }
 
-func NewUserMapper(db *sql.DB) *UserMapper {
+func NewUserMapper(db *sql.DB, cacheManager vulcan.CacheManger[model.User]) *UserMapper {
 	return &UserMapper{
-		db: db,
+		db:           db,
+		cacheManager: cacheManager,
 	}
 }
 
@@ -58,9 +60,9 @@ func (m *UserMapper) Add(user *model.User, opts ...vulcan.Option) error {
 		Args:    []any{user.Id, user.Username, user.Password, user.CreatedAt, user.Email, user.Address},
 		Execer:  m.db,
 	}
-	vulcan.InvokePreHandler(option, opts...)
-	result, err := option.Exec(option.SqlStmt, option.Args...)
-	vulcan.InvokePostHandler(vulcan.NewResultOption(vulcan.SQLTypeInsert, nil, err, result))
+	result, err := vulcan.Invoke(option, func() (sql.Result, error) {
+		return option.Exec(option.SqlStmt, option.Args...)
+	})
 	if err != nil {
 		return err
 	}
@@ -80,9 +82,10 @@ func (m *UserMapper) Add1(user *model.User, opts ...vulcan.Option) (int, error) 
 		Args:    []any{user.Id, user.Username, user.Password, user.CreatedAt, user.Email, user.Address},
 		Execer:  m.db,
 	}
-	vulcan.InvokePreHandler(option, opts...)
-	result, err := option.Exec(option.SqlStmt, option.Args...)
-	vulcan.InvokePostHandler(vulcan.NewResultOption(vulcan.SQLTypeInsert, nil, err, result))
+
+	result, err := vulcan.Invoke(option, func() (sql.Result, error) {
+		return option.Exec(option.SqlStmt, option.Args...)
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -107,9 +110,9 @@ func (m *UserMapper) DeleteById(id int, opts ...vulcan.Option) (int, error) {
 		Args:    []any{id},
 		Execer:  m.db,
 	}
-	vulcan.InvokePreHandler(option, opts...)
-	result, err := option.Exec(option.SqlStmt, option.Args...)
-	vulcan.InvokePostHandler(vulcan.NewResultOption(vulcan.SQLTypeDelete, nil, err, result))
+	result, err := vulcan.Invoke(option, func() (sql.Result, error) {
+		return option.Exec(option.SqlStmt, option.Args...)
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -128,15 +131,17 @@ func (m *UserMapper) FindById(id int, opts ...vulcan.Option) (*model.User, error
 		Args:    []any{id},
 		Execer:  m.db,
 	}
-	vulcan.InvokePreHandler(option, opts...)
-	res := &model.User{}
-	err := option.Get(option.SqlStmt, option.Args...).Scan(&res.Id, &res.Username, &res.Password, &res.CreatedAt, &res.Email, &res.Address)
-	vulcan.InvokePostHandler(vulcan.NewResultOption(vulcan.SQLTypeSelect, res, err, nil))
+	result, err := vulcan.Invoke(option, func() (*model.User, error) {
+		res := &model.User{}
+		err := option.Get(option.SqlStmt, option.Args...).Scan(&res.Id, &res.Username, &res.Password, &res.CreatedAt, &res.Email, &res.Address)
+		return res, err
+	})
+
 	if err != nil {
 		return nil, err
 	}
 
-	return res, nil
+	return result, nil
 }
 
 func (m *UserMapper) UpdatePassword(user *model.User, opts ...vulcan.Option) (int, error) {
@@ -145,12 +150,14 @@ func (m *UserMapper) UpdatePassword(user *model.User, opts ...vulcan.Option) (in
 		Args:    []any{user.Password, user.Username},
 		Execer:  m.db,
 	}
-	vulcan.InvokePreHandler(option, opts...)
-	result, err := option.Exec(option.SqlStmt, option.Args...)
-	vulcan.InvokePostHandler(vulcan.NewResultOption(vulcan.SQLTypeUpdate, nil, err, result))
+
+	result, err := vulcan.Invoke(option, func() (sql.Result, error) {
+		return option.Exec(option.SqlStmt, option.Args...)
+	})
 	if err != nil {
 		return 0, err
 	}
+
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return 0, err
@@ -173,9 +180,10 @@ func (m *UserMapper) UpdateById(user *model.User, opts ...vulcan.Option) (int, e
 		Args:    builder.Args(),
 		Execer:  m.db,
 	}
-	vulcan.InvokePreHandler(option, opts...)
-	result, err := option.Exec(option.SqlStmt, option.Args...)
-	vulcan.InvokePostHandler(vulcan.NewResultOption(vulcan.SQLTypeUpdate, nil, err, result))
+
+	result, err := vulcan.Invoke(option, func() (sql.Result, error) {
+		return option.Exec(option.SqlStmt, option.Args...)
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -200,15 +208,17 @@ func (m *UserMapper) Find(user *model.User) (*model.User, error) {
 		Args:    builder.Args(),
 		Execer:  m.db,
 	}
-	vulcan.InvokePreHandler(option)
-	res := &model.User{}
-	err := option.Get(option.SqlStmt, option.Args...).Scan(&res.Id, &res.Username, &res.Password, &res.CreatedAt, &res.Email, &res.Address)
-	vulcan.InvokePostHandler(vulcan.NewResultOption(vulcan.SQLTypeSelect, res, err, nil))
+
+	result, err := vulcan.Invoke(option, func() (*model.User, error) {
+		res := &model.User{}
+		err := option.Get(option.SqlStmt, option.Args...).Scan(&res.Id, &res.Username, &res.Password, &res.CreatedAt, &res.Email, &res.Address)
+		return res, err
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	return res, nil
+	return result, nil
 }
 
 func (m *UserMapper) Find2(user *model.User) (model.User, error) {
@@ -223,15 +233,17 @@ func (m *UserMapper) Find2(user *model.User) (model.User, error) {
 		Args:    builder.Args(),
 		Execer:  m.db,
 	}
-	vulcan.InvokePreHandler(option)
-	res := model.User{}
-	err := option.Get(option.SqlStmt, option.Args...).Scan(&res.Id, &res.Username, &res.Password, &res.CreatedAt, &res.Email, &res.Address)
-	vulcan.InvokePostHandler(vulcan.NewResultOption(vulcan.SQLTypeSelect, res, err, nil))
-	if err != nil {
+	result, err := vulcan.Invoke(option, func() (model.User, error) {
+		res := model.User{}
+		err := option.Get(option.SqlStmt, option.Args...).Scan(&res.Id, &res.Username, &res.Password, &res.CreatedAt, &res.Email, &res.Address)
 		return res, err
+	})
+
+	if err != nil {
+		return model.User{}, err
 	}
 
-	return res, nil
+	return result, nil
 }
 
 func (m *UserMapper) BatchAdd(users []*model.User, opts ...vulcan.Option) (int, error) {
@@ -246,9 +258,10 @@ func (m *UserMapper) BatchAdd(users []*model.User, opts ...vulcan.Option) (int, 
 		Args:    builder.Args(),
 		Execer:  m.db,
 	}
-	vulcan.InvokePreHandler(option, opts...)
-	result, err := option.Exec(option.SqlStmt, option.Args...)
-	vulcan.InvokePostHandler(vulcan.NewResultOption(vulcan.SQLTypeInsert, nil, err, result))
+
+	result, err := vulcan.Invoke(option, func() (sql.Result, error) {
+		return option.Exec(option.SqlStmt, option.Args...)
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -275,9 +288,10 @@ func (m *UserMapper) UpdateByIdOrUsername(user *model.User, opts ...vulcan.Optio
 		Args:    builder.Args(),
 		Execer:  m.db,
 	}
-	vulcan.InvokePreHandler(option, opts...)
-	result, err := option.Exec(option.SqlStmt, option.Args...)
-	vulcan.InvokePostHandler(vulcan.NewResultOption(vulcan.SQLTypeUpdate, nil, err, result))
+
+	_, err := vulcan.Invoke(option, func() (sql.Result, error) {
+		return option.Exec(option.SqlStmt, option.Args...)
+	})
 	if err != nil {
 		return err
 	}
@@ -297,24 +311,87 @@ func (u *UserMapper) SelectPage(page vulcan.Page, cond *model.QueryCond) ([]*mod
 		Args:      builder.Args(),
 		Extension: page,
 	}
-	vulcan.InvokePreHandler(option)
-	res := []*model.User{}
-	rows, err := option.Select(option.SqlStmt, option.Args...)
-	vulcan.InvokePostHandler(vulcan.NewResultOption(vulcan.SQLTypeSelect, res, err, nil))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		obj := &model.User{}
-		err = rows.Scan(&obj.Id, &obj.Username, &obj.Password, &obj.CreatedAt, &obj.Email, &obj.Address)
+
+	result, err := vulcan.Invoke(option, func() ([]*model.User, error) {
+		res := []*model.User{}
+		rows, err := option.Select(option.SqlStmt, option.Args...)
 		if err != nil {
 			return nil, err
 		}
-		res = append(res, obj)
+		defer rows.Close()
+		for rows.Next() {
+			obj := &model.User{}
+			err = rows.Scan(&obj.Id, &obj.Username, &obj.Password, &obj.CreatedAt, &obj.Email, &obj.Address)
+			if err != nil {
+				return nil, err
+			}
+			res = append(res, obj)
+		}
+		return res, err
+	})
+
+	if err != nil {
+		return nil, err
 	}
 
-	return res, nil
+	return result, nil
+}
+
+func (m *UserMapper) FindByIdCached(id int, opts ...vulcan.Option) (*model.User, error) {
+	option := &vulcan.ExecOption{
+		SqlStmt: "SELECT id, username, password, created_at, email, address FROM t_user WHERE id = ?",
+		Args:    []any{id},
+		Execer:  m.db,
+		Ctx: vulcan.CacheableCtx(&vulcan.CacheConfig[model.User]{
+			Manager: m.cacheManager,
+			Key:     fmt.Sprintf("user:id:%d", id),
+		}),
+	}
+	result, err := vulcan.Invoke(option, func() (*model.User, error) {
+		res := &model.User{}
+		err := option.Get(option.SqlStmt, option.Args...).Scan(&res.Id, &res.Username, &res.Password, &res.CreatedAt, &res.Email, &res.Address)
+		return res, err
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func (m *UserMapper) UpdateByIdEvict(user *model.User, opts ...vulcan.Option) (int, error) {
+	builder := vulcan.NewSqlBuilder(128, 0, 3)
+	builder.AppendStmt("UPDATE t_user SET ")
+	builder.AppendSetStmtConditional(user.Password != "", user.Password, "password = ?").
+		AppendSetStmtConditional(user.Email != "", user.Email, "email = ?").
+		AppendSetStmtConditional(user.Address != "", user.Address, "address = ?").
+		EndSetStmt()
+	builder.AppendStmt("WHERE id = ? ", user.Id)
+
+	option := &vulcan.ExecOption{
+		SqlStmt: builder.String(),
+		Args:    builder.Args(),
+		Execer:  m.db,
+		Ctx: vulcan.CacheEvictCtx(&vulcan.CacheConfig[model.User]{
+			Manager: m.cacheManager,
+			Key:     fmt.Sprintf("user:id:%d", user.Id),
+		}),
+	}
+
+	result, err := vulcan.Invoke(option, func() (sql.Result, error) {
+		return option.Exec(option.SqlStmt, option.Args...)
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+
+	return int(affected), nil
 }
 
 func test() {

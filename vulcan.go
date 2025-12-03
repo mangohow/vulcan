@@ -1,6 +1,7 @@
 package vulcan
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
@@ -24,31 +25,7 @@ type ExecOption struct {
 	Args      []any  `name:"args"`
 	Execer    Execer `name:"execer"`
 	Extension any    `name:"extension"`
-}
-
-type SQLType int
-
-const (
-	SQLTypeSelect SQLType = iota
-	SQLTypeUpdate
-	SQLTypeInsert
-	SQLTypeDelete
-)
-
-type ResultOption struct {
-	SQlType   SQLType
-	Result    any
-	Err       error
-	SQLResult sql.Result
-}
-
-func NewResultOption(sqlType SQLType, res any, err error, sqlRes sql.Result) *ResultOption {
-	return &ResultOption{
-		SQlType:   sqlType,
-		Result:    res,
-		Err:       err,
-		SQLResult: sqlRes,
-	}
+	Ctx       context.Context
 }
 
 func (e *ExecOption) Exec(query string, args ...any) (sql.Result, error) {
@@ -69,6 +46,19 @@ type Option func(*ExecOption)
 func WithTransaction(execer Execer) Option {
 	return func(o *ExecOption) {
 		o.Execer = execer
+	}
+}
+
+type interceptorKey struct{}
+
+func WithInterceptors(interceptor ...InterceptorHandler) Option {
+	return func(o *ExecOption) {
+		ctx := o.Ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+
+		o.Ctx = context.WithValue(ctx, interceptorKey{}, interceptor)
 	}
 }
 

@@ -22,7 +22,7 @@ func NewUserMapper(db *sql.DB) *UserMapper {
 
 func (m *UserMapper) Add(user *model.User) {
 	Insert(`INSERT INTO t_user (id, username, password, create_at, email, address) 
-            VALUES (#{user.Id}, #{user.Username}, #{user.Password}, #{user.Create_at}, #{user.Email}, #{user.Address})`)
+            VALUES (#{user.Id}, #{user.Username}, #{user.Password}, #{user.CreateAt}, #{user.Email}, #{user.Address})`)
 }
 
 func (m *UserMapper) DeleteById(id int) int {
@@ -31,11 +31,10 @@ func (m *UserMapper) DeleteById(id int) int {
 }
 
 func (m *UserMapper) UpdateById(user *model.User) int {
-	a := true
 	Update(SQL().Stmt("UPDATE t_user").
 		Set(If(user.Password != "", "password = #{user.Password}").
 			If(user.Email != "", "email = #{user.Email}").
-			If(user.Address != "" && (user.Id > 0 || a), "address = #{user.Address}")).
+			If(user.Address != "", "address = #{user.Address}")).
 		Stmt("WHERE id = #{user.Id}").Build())
 	return 0
 }
@@ -84,4 +83,20 @@ func (u *UserMapper) SelectListByIds(ids []int) []*model.User {
 		Stmt("SELECT * FROM t_user WHERE id IN").
 		Foreach("ids", "id", ", ", "(", ")", "#{id}").
 		Build())
+}
+
+func (m *UserMapper) FindByIdCached(id int) *model.User {
+	Select("SELECT * FROM t_user WHERE id = #{id}")
+	Cacheable("user:id:#{id}", false)
+	return nil
+}
+
+func (m *UserMapper) UpdateByIdEvict(user *model.User) int {
+	Update(SQL().Stmt("UPDATE t_user").
+		Set(If(user.Password != "", "password = #{user.Password}").
+			If(user.Email != "", "email = #{user.Email}").
+			If(user.Address != "", "address = #{user.Address}")).
+		Stmt("WHERE id = #{user.Id}").Build())
+	CacheEvict("user:id:#{user.Id}", false)
+	return 0
 }

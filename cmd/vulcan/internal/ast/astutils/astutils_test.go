@@ -44,6 +44,29 @@ func TestParseAst(t *testing.T) {
 	ParseAst("../../../../../internal/example/model/user.go", "user.ast")
 }
 
+func TestGenericAst(t *testing.T) {
+	source := `
+package test
+
+type TestGeneric struct {
+	NullTime sql.Null[string]
+}
+`
+	fileSet := token.NewFileSet()
+	f, err := parser.ParseFile(fileSet, "", source, parser.ParseComments)
+	if err != nil {
+		log.Fatal(err)
+	}
+	file, err := os.OpenFile("generic.ast", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = ast.Fprint(file, fileSet, f, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
 func printSource(node ast.Node) {
 	buffer := bytes.NewBuffer(nil)
 	format.Node(buffer, token.NewFileSet(), node)

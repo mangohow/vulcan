@@ -2,12 +2,13 @@ package astutils
 
 import (
 	"fmt"
-	"github.com/mangohow/gowlb/tools/collection"
-	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 	"go/ast"
 	gotoken "go/token"
 	"path/filepath"
 	"reflect"
+
+	"github.com/mangohow/gowlb/tools/collection"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
 )
 
 const (

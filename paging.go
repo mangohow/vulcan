@@ -27,28 +27,29 @@ func (o OrderItems) SqlStmt() string {
 }
 
 type Page interface {
-	CurrentPage() int
+	PageNum() int
 	PageSize() int
 	TotalCount() int
 	TotalPages() int
 	SetTotalCount(int)
 	SetTotalPages(int)
 	IsSelectCount() bool // 是否查询count
+	GetSelectCountSql(originSql string) string
 	Orders() OrderItems
 }
 
 type Paging struct {
-	pageSize    int
-	currentPage int
-	totalCount  int
-	totalPages  int
-	orders      OrderItems
+	pageSize   int
+	pageNum    int
+	totalCount int
+	totalPages int
+	orders     OrderItems
 }
 
 func NewPaging(currentPage, pageSize int) *Paging {
 	return &Paging{
-		currentPage: currentPage,
-		pageSize:    pageSize,
+		pageNum:  currentPage,
+		pageSize: pageSize,
 	}
 }
 
@@ -58,7 +59,7 @@ func (p *Paging) SetPageSize(pageSize int) *Paging {
 }
 
 func (p *Paging) SetCurrentPage(cur int) *Paging {
-	p.currentPage = cur
+	p.pageNum = cur
 	return p
 }
 
@@ -86,8 +87,8 @@ func (p *Paging) AddAscs(columns ...string) *Paging {
 	return p
 }
 
-func (p *Paging) CurrentPage() int {
-	return p.currentPage
+func (p *Paging) PageNum() int {
+	return p.pageNum
 }
 
 func (p *Paging) PageSize() int {
@@ -112,6 +113,12 @@ func (p *Paging) SetTotalPages(i int) {
 
 func (p *Paging) IsSelectCount() bool {
 	return true
+}
+
+func (p *Paging) GetSelectCountSql(originSql string) string {
+	start := strings.Index(originSql, "SELECT") + 6
+	end := strings.Index(originSql, "FROM")
+	return originSql[:start] + " COUNT(*) " + originSql[end:]
 }
 
 func (p *Paging) Orders() OrderItems {

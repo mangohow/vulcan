@@ -1,11 +1,12 @@
 package dbparser
 
 import (
-	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
-	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
 	"go/ast"
 	"go/token"
 	"strings"
+
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/ast/parser/types"
+	"github.com/mangohow/vulcan/cmd/vulcan/internal/errors"
 )
 
 type sqlCall struct {

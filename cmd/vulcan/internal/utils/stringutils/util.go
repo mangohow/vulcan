@@ -27,3 +27,29 @@ func ToPascalCaseByList(parts []string) string {
 	}
 	return strings.Join(result, "")
 }
+
+func UpperFirstLittle(str string) string {
+	if str == "" {
+		return str
+	}
+
+	return strings.ToUpper(str[:1]) + str[1:]
+}
+
+func LowerFirstLittle(str string) string {
+	if str == "" {
+		return str
+	}
+
+	return strings.ToLower(str[:1]) + str[1:]
+}
+
+func IsUpperLetter(str string) bool {
+	for i := range str {
+		if !(str[i] >= 'A' && str[i] <= 'Z') {
+			return false
+		}
+	}
+
+	return true
+}
