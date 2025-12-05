@@ -2,12 +2,16 @@ package vulcan
 
 import (
 	"context"
+	"fmt"
+	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
-type Cacheable interface {
-	CacheKey() string
-}
-
+/*
+*
+如果是local cache, 则需要在实现CacheManger的Get和Set内部处理数据拷贝, 防止外部修改了缓存中的数据
+*/
 type CacheManger[T any] interface {
 	Get(key string) (*T, bool)
 	Set(key string, value *T)
@@ -20,7 +24,9 @@ type CacheConfig[T any] struct {
 	Manager          CacheManger[T]
 	Key              string
 	CacheNil         bool
+	QueryTimeOut     time.Duration
 	BeforeInvocation bool
+	flightGroup      singleflight.Group
 }
 
 func getCacheInterceptor(ctx context.Context) InterceptorHandler {
@@ -48,49 +54,76 @@ func CacheEvictCtx[T any](cfg *CacheConfig[T]) context.Context {
 	}))
 }
 
+type result struct {
+	data any
+	err  error
+}
+
 func cacheableHandler[T any](cfg *CacheConfig[T], option *ExecOption, next Handler) (*T, error) {
-	// 1、查询缓存
-	if val, exist := cfg.Manager.Get(cfg.Key); exist {
-		// 拷贝一份
-		res := *val
-		return &res, nil
+	if cfg.Key == "" {
+		return nil, fmt.Errorf("empty key provided")
 	}
 
-	// 2、缓存不存在, 查询数据库
-	val, err := next(option)
+	// 1、查询缓存
+	if val, exist := cfg.Manager.Get(cfg.Key); exist {
+		return val, nil
+	}
+
+	v, err, _ := cfg.flightGroup.Do(cfg.Key, func() (any, error) {
+		ctx := context.Background()
+		if cfg.QueryTimeOut > 0 {
+			c, cancel := context.WithTimeout(ctx, cfg.QueryTimeOut)
+			ctx = c
+			defer cancel()
+		}
+		resCh := make(chan result)
+
+		go func() {
+			// 2、缓存不存在, 查询数据库
+			val, err := next(option)
+			if err != nil {
+				resCh <- result{nil, err}
+				return
+			}
+
+			var (
+				objPtr *T
+				obj    T
+				ok     bool
+			)
+
+			if val == nil {
+				if cfg.CacheNil {
+					objPtr = nil
+				} else {
+					resCh <- result{nil, nil}
+				}
+			} else {
+				objPtr, ok = val.(*T)
+				if !ok {
+					obj = val.(T)
+					objPtr = &obj
+				}
+			}
+
+			// 3、写入缓存
+			cfg.Manager.Set(cfg.Key, objPtr)
+			resCh <- result{objPtr, nil}
+		}()
+
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("query db timeout, key: %s", cfg.Key)
+		case res := <-resCh:
+			return res.data, res.err
+		}
+	})
+
 	if err != nil {
 		return nil, err
 	}
 
-	var (
-		objPtr *T
-		obj    T
-		ok     bool
-	)
-
-	if val == nil {
-		if cfg.CacheNil {
-			objPtr = nil
-		} else {
-			return nil, nil
-		}
-	} else {
-		objPtr, ok = val.(*T)
-		if !ok {
-			obj = val.(T)
-			objPtr = &obj
-		}
-	}
-
-	// 3、写入缓存
-	if objPtr == nil {
-		cfg.Manager.Set(cfg.Key, nil)
-	} else {
-		cachedObj := *objPtr
-		cfg.Manager.Set(cfg.Key, &cachedObj)
-	}
-
-	return objPtr, nil
+	return v.(*T), nil
 }
 
 func cacheEvictInterceptor[T any](cfg *CacheConfig[T], option *ExecOption, next Handler) (any, error) {

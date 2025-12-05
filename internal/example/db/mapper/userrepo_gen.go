@@ -10,58 +10,26 @@ import (
 	"time"
 )
 
-type Int int
-
-type String string
-
-type Interface interface {
-}
-
-type MyTime time.Time
-
-type Fn func()
-
-type Slice []int
-
-type Pointer *int
-
-type TestStruct1 struct {
-	t1 int
-	t2 string
-}
-
-type TestStruct2 struct {
-	s1 int
-	s2 uint
-	s3 bool
-	s4 string
-	s5 float64
-	s6 []byte
-	s7 []int
-	s8 TestStruct1
-	s9 *TestStruct1
-}
-
-type UserMapper struct {
+type UserRepo struct {
 	db           *sql.DB
 	cacheManager vulcan.CacheManger[model.User]
 }
 
-func NewUserMapper(db *sql.DB, cacheManager vulcan.CacheManger[model.User]) *UserMapper {
-	return &UserMapper{
+func NewUserRepo(db *sql.DB, cacheManager vulcan.CacheManger[model.User]) *UserRepo {
+	return &UserRepo{
 		db:           db,
 		cacheManager: cacheManager,
 	}
 }
 
-func (m *UserMapper) Add(user *model.User, opts ...vulcan.Option) error {
+func (m *UserRepo) Add(user *model.User, opts ...vulcan.Option) error {
 	option := &vulcan.ExecOption{
-		SqlStmt: "INSERT INTO t_user (id, username, password, create_at, email, address) VALUES (?, ?, ?, ?, ?, ?)",
+		SqlStmt: "INSERT INTO t_user (id, username, password, created_at, email, address) VALUES (?, ?, ?, ?, ?, ?)",
 		Args:    []any{user.Id, user.Username, user.Password, user.CreatedAt, user.Email, user.Address},
 		Execer:  m.db,
 	}
 	result, err := vulcan.Invoke(option, func() (sql.Result, error) {
-		return option.Exec(option.SqlStmt, option.Args...)
+		return option.Exec()
 	})
 	if err != nil {
 		return err
@@ -76,15 +44,15 @@ func (m *UserMapper) Add(user *model.User, opts ...vulcan.Option) error {
 	return nil
 }
 
-func (m *UserMapper) Add1(user *model.User, opts ...vulcan.Option) (int, error) {
+func (m *UserRepo) Add1(user *model.User, opts ...vulcan.Option) (int, error) {
 	option := &vulcan.ExecOption{
-		SqlStmt: "INSERT INTO t_user (id, username, password, create_at, email, address) VALUES (?, ?, ?, ?, ?, ?)",
+		SqlStmt: "INSERT INTO t_user (id, username, password, created_at, email, address) VALUES (?, ?, ?, ?, ?, ?)",
 		Args:    []any{user.Id, user.Username, user.Password, user.CreatedAt, user.Email, user.Address},
 		Execer:  m.db,
 	}
 
 	result, err := vulcan.Invoke(option, func() (sql.Result, error) {
-		return option.Exec(option.SqlStmt, option.Args...)
+		return option.Exec()
 	})
 	if err != nil {
 		return 0, err
@@ -104,14 +72,14 @@ func (m *UserMapper) Add1(user *model.User, opts ...vulcan.Option) (int, error) 
 	return int(affected), nil
 }
 
-func (m *UserMapper) DeleteById(id int, opts ...vulcan.Option) (int, error) {
+func (m *UserRepo) DeleteById(id int, opts ...vulcan.Option) (int, error) {
 	option := &vulcan.ExecOption{
 		SqlStmt: "DELETE FROM t_user WHERE id = ?",
 		Args:    []any{id},
 		Execer:  m.db,
 	}
 	result, err := vulcan.Invoke(option, func() (sql.Result, error) {
-		return option.Exec(option.SqlStmt, option.Args...)
+		return option.Exec()
 	})
 	if err != nil {
 		return 0, err
@@ -125,7 +93,7 @@ func (m *UserMapper) DeleteById(id int, opts ...vulcan.Option) (int, error) {
 	return int(affected), nil
 }
 
-func (m *UserMapper) FindById(id int, opts ...vulcan.Option) (*model.User, error) {
+func (m *UserRepo) FindById(id int, opts ...vulcan.Option) (*model.User, error) {
 	option := &vulcan.ExecOption{
 		SqlStmt: "SELECT id, username, password, created_at, email, address FROM t_user WHERE id = ?",
 		Args:    []any{id},
@@ -133,7 +101,7 @@ func (m *UserMapper) FindById(id int, opts ...vulcan.Option) (*model.User, error
 	}
 	result, err := vulcan.Invoke(option, func() (*model.User, error) {
 		res := &model.User{}
-		err := option.Get(option.SqlStmt, option.Args...).Scan(&res.Id, &res.Username, &res.Password, &res.CreatedAt, &res.Email, &res.Address)
+		err := option.Get().Scan(&res.Id, &res.Username, &res.Password, &res.CreatedAt, &res.Email, &res.Address)
 		return res, err
 	})
 
@@ -144,36 +112,14 @@ func (m *UserMapper) FindById(id int, opts ...vulcan.Option) (*model.User, error
 	return result, nil
 }
 
-func (m *UserMapper) UpdatePassword(user *model.User, opts ...vulcan.Option) (int, error) {
-	option := &vulcan.ExecOption{
-		SqlStmt: "UPDATE t_user SET password = #{user.Password} WHERE id = #{user.Id}",
-		Args:    []any{user.Password, user.Username},
-		Execer:  m.db,
-	}
-
-	result, err := vulcan.Invoke(option, func() (sql.Result, error) {
-		return option.Exec(option.SqlStmt, option.Args...)
-	})
-	if err != nil {
-		return 0, err
-	}
-
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-
-	return int(affected), nil
-}
-
-func (m *UserMapper) UpdateById(user *model.User, opts ...vulcan.Option) (int, error) {
+func (m *UserRepo) UpdateById(user *model.User, opts ...vulcan.Option) (int, error) {
 	builder := vulcan.NewSqlBuilder(128, 0, 3)
-	builder.AppendStmt("UPDATE t_user SET ")
-	builder.AppendSetStmtConditional(user.Password != "", user.Password, "password = ?").
-		AppendSetStmtConditional(user.Email != "", user.Email, "email = ?").
-		AppendSetStmtConditional(user.Address != "", user.Address, "address = ?").
+	builder.AppendStmt("UPDATE t_user ")
+	builder.AppendSetStmtConditional(user.Password != "", "password = ?", user.Password).
+		AppendSetStmtConditional(user.Email != "", "email = ?", user.Email).
+		AppendSetStmtConditional(user.Address != "", "address = ?", user.Address).
 		EndSetStmt()
-	builder.AppendStmt("WHERE id = ? ", user.Id)
+	builder.AppendStmt("WHERE id = ?", user.Id)
 
 	option := &vulcan.ExecOption{
 		SqlStmt: builder.String(),
@@ -182,7 +128,7 @@ func (m *UserMapper) UpdateById(user *model.User, opts ...vulcan.Option) (int, e
 	}
 
 	result, err := vulcan.Invoke(option, func() (sql.Result, error) {
-		return option.Exec(option.SqlStmt, option.Args...)
+		return option.Exec()
 	})
 	if err != nil {
 		return 0, err
@@ -196,11 +142,11 @@ func (m *UserMapper) UpdateById(user *model.User, opts ...vulcan.Option) (int, e
 	return int(affected), nil
 }
 
-func (m *UserMapper) Find(user *model.User) (*model.User, error) {
+func (m *UserRepo) Find(user *model.User) (*model.User, error) {
 	builder := vulcan.NewSqlBuilder(128, 2, 0)
-	builder.AppendStmt("SELECT id, username, password, created_at, email, address FROM t_user")
-	builder.AppendWhereStmtConditional(user.Username != "", user.Username, "AND username = ?").
-		AppendWhereStmtConditional(user.Password != "", user.Password, "AND password = ?").
+	builder.AppendStmt("SELECT id, username, password, created_at, email, address FROM t_user ")
+	builder.AppendWhereStmtConditional(user.Username != "", "AND username = ?", user.Username).
+		AppendWhereStmtConditional(user.Password != "", "AND password = ?", user.Password).
 		EndWhereStmt()
 
 	option := &vulcan.ExecOption{
@@ -211,7 +157,7 @@ func (m *UserMapper) Find(user *model.User) (*model.User, error) {
 
 	result, err := vulcan.Invoke(option, func() (*model.User, error) {
 		res := &model.User{}
-		err := option.Get(option.SqlStmt, option.Args...).Scan(&res.Id, &res.Username, &res.Password, &res.CreatedAt, &res.Email, &res.Address)
+		err := option.Get().Scan(&res.Id, &res.Username, &res.Password, &res.CreatedAt, &res.Email, &res.Address)
 		return res, err
 	})
 	if err != nil {
@@ -221,11 +167,11 @@ func (m *UserMapper) Find(user *model.User) (*model.User, error) {
 	return result, nil
 }
 
-func (m *UserMapper) Find2(user *model.User) (model.User, error) {
+func (m *UserRepo) Find2(user *model.User) (model.User, error) {
 	builder := vulcan.NewSqlBuilder(128, 2, 0)
-	builder.AppendStmt("SELECT id, username, password, created_at, email, address FROM t_user")
-	builder.AppendWhereStmtConditional(user.Username != "", user.Username, "AND username = ?").
-		AppendWhereStmtConditional(user.Password != "", user.Password, "AND password = ?").
+	builder.AppendStmt("SELECT id, username, password, created_at, email, address FROM t_user ")
+	builder.AppendWhereStmtConditional(user.Username != "", "AND username = ?", user.Username).
+		AppendWhereStmtConditional(user.Password != "", "AND password = ?", user.Password).
 		EndWhereStmt()
 
 	option := &vulcan.ExecOption{
@@ -235,7 +181,7 @@ func (m *UserMapper) Find2(user *model.User) (model.User, error) {
 	}
 	result, err := vulcan.Invoke(option, func() (model.User, error) {
 		res := model.User{}
-		err := option.Get(option.SqlStmt, option.Args...).Scan(&res.Id, &res.Username, &res.Password, &res.CreatedAt, &res.Email, &res.Address)
+		err := option.Get().Scan(&res.Id, &res.Username, &res.Password, &res.CreatedAt, &res.Email, &res.Address)
 		return res, err
 	})
 
@@ -246,10 +192,10 @@ func (m *UserMapper) Find2(user *model.User) (model.User, error) {
 	return result, nil
 }
 
-func (m *UserMapper) BatchAdd(users []*model.User, opts ...vulcan.Option) (int, error) {
+func (m *UserRepo) BatchAdd(users []*model.User, opts ...vulcan.Option) (int, error) {
 	builder := vulcan.NewSqlBuilder(128, 0, 0)
-	builder.AppendStmt("INSERT INTO t_user (id, username, password, create_at, email, address) VALUES ")
-	vulcan.AppendLoopStmt(builder, users, " ", "", "", func(user *model.User) []any {
+	builder.AppendStmt("INSERT INTO t_user (id, username, password, created_at, email, address) VALUES ")
+	vulcan.AppendLoopStmt(builder, users, ", ", "", "", func(user *model.User) []any {
 		return []any{user.Id, user.Username, user.Password, user.CreatedAt, user.Email, user.Address}
 	}, "(?, ?, ?, ?, ?, ?)")
 
@@ -260,7 +206,7 @@ func (m *UserMapper) BatchAdd(users []*model.User, opts ...vulcan.Option) (int, 
 	}
 
 	result, err := vulcan.Invoke(option, func() (sql.Result, error) {
-		return option.Exec(option.SqlStmt, option.Args...)
+		return option.Exec()
 	})
 	if err != nil {
 		return 0, err
@@ -274,11 +220,11 @@ func (m *UserMapper) BatchAdd(users []*model.User, opts ...vulcan.Option) (int, 
 	return int(affected), nil
 }
 
-func (m *UserMapper) UpdateByIdOrUsername(user *model.User, opts ...vulcan.Option) error {
+func (m *UserRepo) UpdateByIdOrUsername(user *model.User, opts ...vulcan.Option) error {
 	builder := vulcan.NewSqlBuilder(128, 1, 2)
 	builder.AppendStmt("UPDATE t_user SET")
-	builder.AppendSetStmtConditional(user.Password != "", user.Password, "password = ?").
-		AppendSetStmtConditional(user.Email != "", user.Email, "email = ?")
+	builder.AppendSetStmtConditional(user.Password != "", "password = ?", user.Password).
+		AppendSetStmtConditional(user.Email != "", "email = ?", user.Email)
 	builder.AppendWhereStmtChoosed(vulcan.MakeSlice(
 		vulcan.NewConditionSql(user.Id > 0, "id = ?", user.Id),
 		vulcan.NewConditionSql(user.Username != "", "username = ?", user.Username)), "", nil)
@@ -290,7 +236,7 @@ func (m *UserMapper) UpdateByIdOrUsername(user *model.User, opts ...vulcan.Optio
 	}
 
 	_, err := vulcan.Invoke(option, func() (sql.Result, error) {
-		return option.Exec(option.SqlStmt, option.Args...)
+		return option.Exec()
 	})
 	if err != nil {
 		return err
@@ -299,11 +245,11 @@ func (m *UserMapper) UpdateByIdOrUsername(user *model.User, opts ...vulcan.Optio
 	return nil
 }
 
-func (u *UserMapper) SelectPage(page vulcan.Page, cond *model.QueryCond) ([]*model.User, error) {
+func (u *UserRepo) SelectPage(page vulcan.Page, cond *model.QueryCond) ([]*model.User, error) {
 	builder := vulcan.NewSqlBuilder(128, 2, 0)
 	builder.AppendStmt("SELECT id, username, password, created_at, email, address FROM t_user ")
-	builder.AppendWhereStmtConditional(cond.Username != "", cond.Username, "AND username = ?").
-		AppendWhereStmtConditional(cond.Address != "", cond.Address, "AND address = ?").
+	builder.AppendWhereStmtConditional(cond.Username != "", "AND username = ?", cond.Username).
+		AppendWhereStmtConditional(cond.Address != "", "AND address = ?", cond.Address).
 		EndWhereStmt()
 
 	option := &vulcan.ExecOption{
@@ -314,7 +260,7 @@ func (u *UserMapper) SelectPage(page vulcan.Page, cond *model.QueryCond) ([]*mod
 
 	result, err := vulcan.Invoke(option, func() ([]*model.User, error) {
 		res := []*model.User{}
-		rows, err := option.Select(option.SqlStmt, option.Args...)
+		rows, err := option.Select()
 		if err != nil {
 			return nil, err
 		}
@@ -337,19 +283,34 @@ func (u *UserMapper) SelectPage(page vulcan.Page, cond *model.QueryCond) ([]*mod
 	return result, nil
 }
 
-func (m *UserMapper) FindByIdCached(id int, opts ...vulcan.Option) (*model.User, error) {
+func (u *UserRepo) SelectBatchIds(ids []int) ([]*model.User, error) {
+	builder := vulcan.NewSqlBuilder(128, 2, 0)
+	builder.AppendStmt("SELECT id, username, password, created_at, email, address FROM t_user WHERE id IN ")
+	vulcan.AppendLoopStmt(builder, ids, ", ", "(", ")", func(id int) []any {
+		return []any{id}
+	}, "?")
+
 	option := &vulcan.ExecOption{
-		SqlStmt: "SELECT id, username, password, created_at, email, address FROM t_user WHERE id = ?",
-		Args:    []any{id},
-		Execer:  m.db,
-		Ctx: vulcan.CacheableCtx(&vulcan.CacheConfig[model.User]{
-			Manager: m.cacheManager,
-			Key:     fmt.Sprintf("user:id:%d", id),
-		}),
+		SqlStmt: builder.String(),
+		Args:    builder.Args(),
+		Execer:  u.db,
 	}
-	result, err := vulcan.Invoke(option, func() (*model.User, error) {
-		res := &model.User{}
-		err := option.Get(option.SqlStmt, option.Args...).Scan(&res.Id, &res.Username, &res.Password, &res.CreatedAt, &res.Email, &res.Address)
+
+	result, err := vulcan.Invoke(option, func() ([]*model.User, error) {
+		res := []*model.User{}
+		rows, err := option.Select()
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			obj := &model.User{}
+			err = rows.Scan(&obj.Id, &obj.Username, &obj.Password, &obj.CreatedAt, &obj.Email, &obj.Address)
+			if err != nil {
+				return nil, err
+			}
+			res = append(res, obj)
+		}
 		return res, err
 	})
 
@@ -360,12 +321,36 @@ func (m *UserMapper) FindByIdCached(id int, opts ...vulcan.Option) (*model.User,
 	return result, nil
 }
 
-func (m *UserMapper) UpdateByIdEvict(user *model.User, opts ...vulcan.Option) (int, error) {
+func (m *UserRepo) FindByIdCached(id int, opts ...vulcan.Option) (*model.User, error) {
+	option := &vulcan.ExecOption{
+		SqlStmt: "SELECT id, username, password, created_at, email, address FROM t_user WHERE id = ?",
+		Args:    []any{id},
+		Execer:  m.db,
+		Ctx: vulcan.CacheableCtx(&vulcan.CacheConfig[model.User]{
+			Manager:      m.cacheManager,
+			Key:          fmt.Sprintf("user:id:%d", id),
+			QueryTimeOut: time.Second * 10,
+		}),
+	}
+	result, err := vulcan.Invoke(option, func() (*model.User, error) {
+		res := &model.User{}
+		err := option.Get().Scan(&res.Id, &res.Username, &res.Password, &res.CreatedAt, &res.Email, &res.Address)
+		return res, err
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func (m *UserRepo) UpdateByIdEvict(user *model.User, opts ...vulcan.Option) (int, error) {
 	builder := vulcan.NewSqlBuilder(128, 0, 3)
 	builder.AppendStmt("UPDATE t_user SET ")
-	builder.AppendSetStmtConditional(user.Password != "", user.Password, "password = ?").
-		AppendSetStmtConditional(user.Email != "", user.Email, "email = ?").
-		AppendSetStmtConditional(user.Address != "", user.Address, "address = ?").
+	builder.AppendSetStmtConditional(user.Password != "", "password = ?", user.Password).
+		AppendSetStmtConditional(user.Email != "", "email = ?", user.Email).
+		AppendSetStmtConditional(user.Address != "", "address = ?", user.Address).
 		EndSetStmt()
 	builder.AppendStmt("WHERE id = ? ", user.Id)
 
@@ -380,7 +365,7 @@ func (m *UserMapper) UpdateByIdEvict(user *model.User, opts ...vulcan.Option) (i
 	}
 
 	result, err := vulcan.Invoke(option, func() (sql.Result, error) {
-		return option.Exec(option.SqlStmt, option.Args...)
+		return option.Exec()
 	})
 	if err != nil {
 		return 0, err
@@ -392,28 +377,4 @@ func (m *UserMapper) UpdateByIdEvict(user *model.User, opts ...vulcan.Option) (i
 	}
 
 	return int(affected), nil
-}
-
-func test() {
-	m := model.User{}
-	u1 := &m
-	u2 := *u1
-	_ = u2
-
-	res1 := model.User{}
-	res2 := &model.User{}
-	res3 := []model.User{}
-	res4 := []*model.User{}
-	res5 := 0
-	res6 := int64(0)
-	res7 := ""
-	res8 := 0.0
-	res9 := true
-	res10 := []int{}
-	fmt.Println(res1, res2, res3, res4, res5, res6, res7, res8, res9, res10)
-}
-
-func test1() (string, error) {
-	var err error
-	return "", err
 }

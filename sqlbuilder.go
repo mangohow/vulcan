@@ -91,7 +91,7 @@ func AppendLoopStmt[T any](s *SqlBuilder, collection []T, sep, open, close strin
 		args := fn(v)
 		s.args = append(s.args, args...)
 		s.b.WriteString(sql)
-		if i >= 0 && sep != "" {
+		if i < len(collection)-1 && sep != "" {
 			s.b.WriteString(sep)
 		}
 	}

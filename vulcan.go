@@ -28,16 +28,16 @@ type ExecOption struct {
 	Ctx       context.Context
 }
 
-func (e *ExecOption) Exec(query string, args ...any) (sql.Result, error) {
-	return e.Execer.Exec(query, args...)
+func (e *ExecOption) Exec() (sql.Result, error) {
+	return e.Execer.Exec(e.SqlStmt, e.Args...)
 }
 
-func (e *ExecOption) Select(query string, args ...any) (*sql.Rows, error) {
-	return e.Execer.Query(query, args...)
+func (e *ExecOption) Select() (*sql.Rows, error) {
+	return e.Execer.Query(e.SqlStmt, e.Args...)
 }
 
-func (e *ExecOption) Get(query string, args ...any) *sql.Row {
-	return e.Execer.QueryRow(query, args...)
+func (e *ExecOption) Get() *sql.Row {
+	return e.Execer.QueryRow(e.SqlStmt, e.Args...)
 }
 
 type Option func(*ExecOption)

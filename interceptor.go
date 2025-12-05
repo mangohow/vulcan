@@ -1,6 +1,7 @@
 package vulcan
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -17,6 +18,9 @@ var (
 )
 
 func Invoke[T any](option *ExecOption, execHandler func() (T, error)) (T, error) {
+	if option.Ctx == nil {
+		option.Ctx = context.Background()
+	}
 	// 构建拦截器链
 	interceptorChain := buildInterceptorChain(option)
 	if interceptorChain == nil {
@@ -113,7 +117,18 @@ func SetupSqlDebugInterceptor(logger DebugLogger) {
 		logger.Debug("SQL        ==> %s", option.SqlStmt)
 		builder := strings.Builder{}
 		for i, arg := range option.Args {
-			builder.WriteString(fmt.Sprintf("%v(%T)", arg, arg))
+			switch arg.(type) {
+			case string:
+				builder.WriteString(fmt.Sprintf("%T(%q)", arg, arg))
+			case time.Time:
+				builder.WriteString(fmt.Sprintf("DATETIME(%s)", arg.(time.Time).Format(time.DateTime)))
+			case *time.Time:
+				if arg != nil {
+					builder.WriteString(fmt.Sprintf("DATETIME(%v)", arg.(*time.Time).Format(time.DateTime)))
+				}
+			default:
+				builder.WriteString(fmt.Sprintf("%T(%v)", arg, arg))
+			}
 			if i != len(option.Args)-1 {
 				builder.WriteString(", ")
 			}

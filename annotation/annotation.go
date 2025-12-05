@@ -1,5 +1,7 @@
 package annotation
 
+import "time"
+
 const (
 	tip = "use vulcan to generate code"
 )
@@ -20,7 +22,7 @@ func Delete(sql string) string {
 	panic(tip)
 }
 
-func Cacheable(key string, cacheNil bool) {
+func Cacheable(key string, cacheNil bool, queryTimeOut time.Duration) {
 	panic(tip)
 }
 

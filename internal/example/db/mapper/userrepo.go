@@ -5,32 +5,45 @@ package mapper
 
 import (
 	"database/sql"
+
 	"github.com/mangohow/vulcan"
 	. "github.com/mangohow/vulcan/annotation"
 	"github.com/mangohow/vulcan/internal/example/model"
 )
 
-type UserMapper struct {
-	db *sql.DB
+type UserRepo struct {
+	db           *sql.DB
+	cacheManager vulcan.CacheManger[model.User]
 }
 
-func NewUserMapper(db *sql.DB) *UserMapper {
-	return &UserMapper{
-		db: db,
+func NewUserRepo(db *sql.DB, cacheManager vulcan.CacheManger[model.User]) *UserRepo {
+	return &UserRepo{
+		db:           db,
+		cacheManager: cacheManager,
 	}
 }
 
-func (m *UserMapper) Add(user *model.User) {
+func (m *UserRepo) Add(user *model.User) {
 	Insert(`INSERT INTO t_user (id, username, password, create_at, email, address) 
             VALUES (#{user.Id}, #{user.Username}, #{user.Password}, #{user.CreateAt}, #{user.Email}, #{user.Address})`)
 }
 
-func (m *UserMapper) DeleteById(id int) int {
+func (m *UserRepo) Add1(user *model.User) int {
+	Insert(`INSERT INTO t_user (id, username, password, create_at, email, address) 
+            VALUES (#{user.Id}, #{user.Username}, #{user.Password}, #{user.CreateAt}, #{user.Email}, #{user.Address})`)
+}
+
+func (m *UserRepo) DeleteById(id int) int {
 	Delete("DELETE FROM t_user WHERE id = #{id}")
 	return 0
 }
 
-func (m *UserMapper) UpdateById(user *model.User) int {
+func (m *UserRepo) FindById(id int) *model.User {
+	Select("SELECT * FROM t_user WHERE id = #{id}")
+	return nil
+}
+
+func (m *UserRepo) UpdateById(user *model.User) int {
 	Update(SQL().Stmt("UPDATE t_user").
 		Set(If(user.Password != "", "password = #{user.Password}").
 			If(user.Email != "", "email = #{user.Email}").
@@ -39,28 +52,32 @@ func (m *UserMapper) UpdateById(user *model.User) int {
 	return 0
 }
 
-func (m *UserMapper) FindById(id int) *model.User {
-	Select("SELECT * FROM t_user WHERE id = #{id}")
-	return nil
-}
-
-func (m *UserMapper) Find(user *model.User) *model.User {
+func (m *UserRepo) Find(user *model.User) *model.User {
 	Select(SQL().
 		Stmt("SELECT * FROM t_user").
 		Where(If(user.Username != "", "username = #{user.Username}").
 			If(user.Address != "", "address = #{user.Address}")).
 		Build())
-	panic("")
+	return nil
 }
 
-func (m *UserMapper) BatchAdd(users []*model.User) {
+func (m *UserRepo) Find2(user *model.User) model.User {
+	Select(SQL().
+		Stmt("SELECT * FROM t_user").
+		Where(If(user.Username != "", "username = #{user.Username}").
+			If(user.Address != "", "address = #{user.Address}")).
+		Build())
+	return nil
+}
+
+func (m *UserRepo) BatchAdd(users []*model.User) {
 	Insert(SQL().
 		Stmt("INSERT INTO t_user (id, username, password, create_at, email, address) VALUES ").
-		Foreach("users", "user", " ", "", "",
+		Foreach("users", "user", ", ", "", "",
 			"(#{user.Id}, #{user.Username}, #{user.Password}, #{user.CreateAt}, #{user.Email}, #{user.Address})").Build())
 }
 
-func (m *UserMapper) UpdateByIdOrUsername(user *model.User) {
+func (m *UserRepo) UpdateByIdOrUsername(user *model.User) {
 	Update(SQL().
 		Stmt("UPDATE t_user").
 		Set(If(user.Password != "", "password = #{user.Password}").
@@ -70,7 +87,7 @@ func (m *UserMapper) UpdateByIdOrUsername(user *model.User) {
 		Build())
 }
 
-func (u *UserMapper) SelectPage(page vulcan.Page, cond *model.QueryCond) []*model.User {
+func (u *UserRepo) SelectPage(page vulcan.Page, cond *model.QueryCond) []*model.User {
 	Select(SQL().
 		Stmt("SELECT * FROM t_user").
 		Where(If(cond.Username != "", "And username = #{cond.Username}").
@@ -78,20 +95,20 @@ func (u *UserMapper) SelectPage(page vulcan.Page, cond *model.QueryCond) []*mode
 	return nil
 }
 
-func (u *UserMapper) SelectListByIds(ids []int) []*model.User {
+func (u *UserRepo) SelectBatchIds(ids []int) []*model.User {
 	Select(SQL().
 		Stmt("SELECT * FROM t_user WHERE id IN").
 		Foreach("ids", "id", ", ", "(", ")", "#{id}").
 		Build())
 }
 
-func (m *UserMapper) FindByIdCached(id int) *model.User {
+func (m *UserRepo) FindByIdCached(id int) *model.User {
 	Select("SELECT * FROM t_user WHERE id = #{id}")
 	Cacheable("user:id:#{id}", false)
 	return nil
 }
 
-func (m *UserMapper) UpdateByIdEvict(user *model.User) int {
+func (m *UserRepo) UpdateByIdEvict(user *model.User) int {
 	Update(SQL().Stmt("UPDATE t_user").
 		Set(If(user.Password != "", "password = #{user.Password}").
 			If(user.Email != "", "email = #{user.Email}").
