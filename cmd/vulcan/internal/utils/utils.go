@@ -151,6 +151,7 @@ func TrimLineWithPrefix(content []byte, sub ...[]byte) []byte {
 loop:
 	for _, line := range lines {
 		for _, sb := range sub {
+			line = bytes.TrimLeft(line, " ")
 			if bytes.HasPrefix(line, sb) {
 				continue loop
 			}

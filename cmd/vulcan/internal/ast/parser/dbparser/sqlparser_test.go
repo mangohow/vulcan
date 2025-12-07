@@ -76,3 +76,13 @@ func TestParseSqlFile(t *testing.T) {
 	}
 	fmt.Println(string(content))
 }
+
+func TestSqlParserMultiTable(t *testing.T) {
+	sql := `SELECT u.*, ui.address, ui.email FROM t_user u LEFT JOIN t_userinfo ui ON u.id = ui.user_id WHERE u.id = 1; 
+`
+	stmt, err := sqlparser.Parse(sql)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = stmt
+}

@@ -33,7 +33,7 @@ func (p *PackageInfo) String() string {
 type File struct {
 	AstFile      *ast.File
 	PkgInfo      PackageInfo   // 导入的包信息
-	Declarations []Declaration // 文件中的声明声明
+	Declarations []Declaration // 文件中的声明
 }
 
 func (f *File) AddAstDecl(decl ast.Decl) {
@@ -64,7 +64,8 @@ type FuncDecl struct {
 	OutputParam           map[string]*Param        // 出参信息
 	FuncReturnResultParam *Param                   // 函数出参1类型
 	Sql                   []SQL                    // SQL体
-	Annotation            string                   // SQL类型 Insert、Delete、Update、Select
+	Annotation            []AnnotationInfo         // 使用的注解
+	SQLAnnotation         AnnotationInfo           // SQL注解 Insert、Delete、Update、Select
 	SelectFields          []string                 // select语句中对应结构体中字段的名称
 	SqlParseResult        *sqlutils.SqlParseResult // 解析出sql中的#{Args}
 }
@@ -158,4 +159,9 @@ type ModelField struct {
 	ColumnName      string // 对应表中列名
 	IsPrimaryKey    bool   // 是否是主键
 	IsAutoIncrement bool   // 是否自增
+}
+
+type AnnotationInfo struct {
+	CallExpr *ast.CallExpr
+	Name     string
 }

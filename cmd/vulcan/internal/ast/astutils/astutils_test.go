@@ -36,11 +36,11 @@ func ParseAst(src, dst string) error {
 }
 
 func TestParseAst(t *testing.T) {
-	err := ParseAst("../../../../../internal/example/db/mapper/usermapper.go", "usermapper.ast")
+	err := ParseAst("../../../../../internal/example/db/mapper/userrepo.go", "userrepo.ast")
 	if err != nil {
 		log.Println(err)
 	}
-	ParseAst("../../../../../internal/example/db/mapper/usermapper_gen.go", "usermapper_gen.ast")
+	ParseAst("../../../../../internal/example/db/mapper/userrepo_gen.go", "userrepo_gen.ast")
 	ParseAst("../../../../../internal/example/model/user.go", "user.ast")
 }
 

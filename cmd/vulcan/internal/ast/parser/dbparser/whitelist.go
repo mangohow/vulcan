@@ -23,6 +23,17 @@ var (
 			"NullTime":    reflect.Struct,
 			"Null":        reflect.Struct,
 		},
+		"github.com/mangohow/vulcan/db/nullable": {
+			"Bool":    reflect.Struct,
+			"Byte":    reflect.Struct,
+			"Float64": reflect.Struct,
+			"Int16":   reflect.Struct,
+			"Int32":   reflect.Struct,
+			"Int64":   reflect.Struct,
+			"String":  reflect.Struct,
+			"Time":    reflect.Struct,
+			"Value":   reflect.Struct,
+		},
 	}
 )
 

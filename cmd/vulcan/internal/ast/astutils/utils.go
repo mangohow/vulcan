@@ -212,53 +212,42 @@ func StringList(args ...string) []string {
 	return args
 }
 
-// FindCallsInFuncBody 在函数体中寻找函数调用
+// FindAnnotationsInFuncBody 在函数体中寻找注解函数
 // 例如FindCallInFuncBody("Select", "github.com/mangohow/vulcan/annocation", block, pkgInfo)
 // 为在block函数体中寻找包为github.com/mangohow/vulcan/annocation的Select函数调用
-func FindCallsInFuncBody(fnName []string, pkgName string, block *ast.BlockStmt, pkgInfo types.PackageInfo) (*ast.CallExpr, string) {
-	// 先查找包里面是否有目标包
-	var targetPkg *types.ImportInfo
-	for i, imp := range pkgInfo.Imports {
-		if imp.AbsPackagePath == pkgName {
-			targetPkg = &pkgInfo.Imports[i]
-			break
-		}
+func FindAnnotationsInFuncBody(fnName []string, pkgName string, block *ast.BlockStmt, pkgInfo types.PackageInfo) (res []types.AnnotationInfo) {
+	if len(block.List) == 0 {
+		return nil
 	}
 
-	var annoName string
-	if targetPkg == nil {
-		return nil, ""
+	// 查找包里面是否有目标包的导入
+	importedName, ok := pkgInfo.ImportsMap[pkgName]
+	if !ok {
+		return nil
 	}
 
 	var (
-		res   *ast.CallExpr
-		found bool
-		set   = collection.NewSet[string]()
+		name, funcName string
+		annoName       string
+		set            = collection.NewSetFromSlice(fnName)
 	)
-	for _, s := range fnName {
-		set.Add(s)
-	}
-
-	ast.Inspect(block, func(n ast.Node) bool {
-		if found {
-			return false
-		}
-
-		expr, ok := n.(*ast.CallExpr)
+	// 查询注解调用
+	for _, stmt := range block.List {
+		exprStmt, ok := stmt.(*ast.ExprStmt)
 		if !ok {
-			return true
+			continue
+		}
+		callExpr, ok := exprStmt.X.(*ast.CallExpr)
+		if !ok {
+			continue
 		}
 
-		var (
-			name, funcName string
-		)
-
-		fn := expr.Fun
+		fn := callExpr.Fun
 		switch f := fn.(type) {
 		case *ast.SelectorExpr:
 			i, ok := f.X.(*ast.Ident)
 			if !ok {
-				return true
+				continue
 			}
 			name = i.Name
 			funcName = f.Sel.Name
@@ -268,16 +257,15 @@ func FindCallsInFuncBody(fnName []string, pkgName string, block *ast.BlockStmt, 
 			annoName = funcName
 		}
 
-		if set.Has(funcName) && (targetPkg.Name == "." || name == filepath.Base(pkgName)) {
-			found = true
-			res = expr
-			return false
+		if set.Has(funcName) && (importedName == "." || name == filepath.Base(pkgName)) {
+			res = append(res, types.AnnotationInfo{
+				CallExpr: callExpr,
+				Name:     annoName,
+			})
 		}
+	}
 
-		return true
-	})
-
-	return res, annoName
+	return
 }
 
 func FindCallsInBlockStmt(fnName []string, pkgName string, block *ast.BlockStmt) (*ast.CallExpr, string) {

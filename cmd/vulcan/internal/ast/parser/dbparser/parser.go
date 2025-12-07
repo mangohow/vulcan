@@ -95,10 +95,11 @@ func (p *FileParser) Parse(filename string) (*types.File, error) {
 		fileInfo.Declarations[i].PkgInfo = packageInfo
 	}
 
-	// 处理包导入信息
+	// 处理包导入信息, 过滤掉无用的包导入
 	fileInfo.PkgInfo.AstImports = stream.Filter(fileInfo.PkgInfo.AstImports, func(spec *ast.ImportSpec) bool {
 		return !utils.Contains(p.filterPackages, strings.Trim(spec.Path.Value, `"`))
 	})
+	// 增加需要导入的包
 	fileInfo.PkgInfo.AstImports = append(fileInfo.PkgInfo.AstImports, stream.Map(p.addPackages, func(name string) *ast.ImportSpec {
 		return &ast.ImportSpec{
 			Path: astutils.BuildBasicLit(token.STRING, fmt.Sprintf("%q", name)),
@@ -166,11 +167,16 @@ func (p *FileParser) parseFuncDeclare(fd *ast.FuncDecl, pkgInfo types.PackageInf
 		OutputParam: make(map[string]*types.Param),
 		FuncName:    fd.Name.Name,
 	}
-	callExpr, annoName := astutils.FindCallsInFuncBody(types.SQLAnnotationFuncs, types.AnnotationPackageName, fd.Body, pkgInfo)
-	if callExpr == nil {
+	annotationInfos := astutils.FindAnnotationsInFuncBody(types.SQLAnnotationFuncs, types.AnnotationPackageName, fd.Body, pkgInfo)
+	// 如果找不到, 则无需为该函数生成样板代码
+	if len(annotationInfos) == 0 {
 		return nil, nil
 	}
-	res.Annotation = annoName
+
+	// 校验注解
+	if err := p.validateAnnotation(annotationInfos); err != nil {
+		return nil, err
+	}
 
 	// 解析注解
 	// 1. 先处理接收器
@@ -198,8 +204,8 @@ func (p *FileParser) parseFuncDeclare(fd *ast.FuncDecl, pkgInfo types.PackageInf
 		return nil, err
 	}
 
-	// 4. 处理函数体
-	if err := p.parseFuncBody(fd.Body, res, pkgInfo); err != nil {
+	// 4. 处理注解调用
+	if err := p.parseAnnotations(res); err != nil {
 		return nil, err
 	}
 
@@ -209,9 +215,7 @@ func (p *FileParser) parseFuncDeclare(fd *ast.FuncDecl, pkgInfo types.PackageInf
 func (p *FileParser) checkReceiverInvalid(receiver *ast.Field, fnDecl *types.FuncDecl) error {
 	expr := receiver.Type
 	name := ""
-	fnDecl.Receiver = &types.Param{
-		Name: receiver.Names[0].Name,
-	}
+	fnDecl.Receiver = &types.Param{}
 	receiverType := &fnDecl.Receiver.Type
 loop:
 	for {
@@ -234,6 +238,7 @@ loop:
 		// 生成receiver name
 		receiver.Names = []*ast.Ident{ast.NewIdent(genReceiverName(name))}
 	}
+	fnDecl.Receiver.Name = receiver.Names[0].Name
 
 	receiverType.Name = name
 
@@ -345,10 +350,10 @@ func (p *FileParser) parseFieldExpr(expr ast.Expr, typeParam *types.Param, pkgIn
 loop:
 	for {
 		switch et := expr.(type) {
-		case *ast.Ident:
+		case *ast.Ident: // 类型名只包含一个标识符, 比如 int、string、User
 			typeName = et.Name
 			break loop
-		case *ast.SelectorExpr:
+		case *ast.SelectorExpr: // 包名.类型名, 比如 model.User
 			i, ok := et.X.(*ast.Ident)
 			if !ok {
 				return errors.Errorf("unsupported input parameter type: %s", typeParam.Name)
@@ -356,8 +361,8 @@ loop:
 			typeName = et.Sel.Name
 			typePkgName = i.Name
 			break loop
-		case *ast.StarExpr:
-			if isPointer {
+		case *ast.StarExpr: // 指针类型, 比如 *int、*model.User
+			if isPointer { // 避免多级指针
 				return errors.Errorf("unsupported multi level pointer, type: %s", typeParam.Name)
 			}
 			typeSpec.Kind = reflect.Pointer
@@ -365,8 +370,8 @@ loop:
 			typeSpec = typeSpec.ValueType
 			isPointer = true
 			expr = et.X
-		case *ast.ArrayType:
-			if isPointer {
+		case *ast.ArrayType: // 切片或数组类型, 比如 []string
+			if isPointer { // 避免切片指针
 				return errors.Errorf("unsupported pointer slice type")
 			}
 			typeSpec.Kind = reflect.Slice
@@ -412,7 +417,7 @@ loop:
 // 如果有参数, 该参数可以为结构体、结构体指针、切片（切片元素为结构体、切片元素为结构体指针、基本类型）、基本类型）
 // 参数不能为基本类型的指针, 没有意义
 func (p *FileParser) parseOutputParameter(params []*ast.Field, fnDecl *types.FuncDecl, pkgInfo types.PackageInfo) error {
-	if fnDecl.Annotation == types.SQLSelectFunc && len(params) == 0 {
+	if fnDecl.SQLAnnotation.Name == types.SQLSelectFunc && len(params) == 0 {
 		return errors.Errorf("Select stmt must have return parameter")
 	}
 
@@ -422,30 +427,20 @@ func (p *FileParser) parseOutputParameter(params []*ast.Field, fnDecl *types.Fun
 
 	// 检查出参类型
 	// 查询时: 第一个为结构体、基本类型、切片或指针
-	// 增删改: 第一个参数为Number类型(int, int64, ..., uint, uint64...), 或只有一个error参数
-	// 第二个为error类型
-	if len(params) > 2 {
+	// 增删改: 第一个参数为Number类型(int, int64, ..., uint, uint64...)
+	if len(params) > 1 {
 		return errors.Errorf("function must return 0 or 1 results")
-	}
-
-	for _, p := range params {
-		if len(p.Names) != 0 {
-			return errors.Errorf("output parameter must not have default name")
-		}
 	}
 
 	paramType := &types.Param{}
 	resultField := params[0]
-	if len(resultField.Names) > 0 && resultField.Names[0] != nil {
-		paramType.Name = resultField.Names[0].Name
-	}
 	if err := p.parseFieldExpr(resultField.Type, paramType, pkgInfo); err != nil {
 		return err
 	}
 
 	fnDecl.FuncReturnResultParam = paramType
 
-	if fnDecl.Annotation == types.SQLSelectFunc {
+	if fnDecl.SQLAnnotation.Name == types.SQLSelectFunc {
 		// 如果出参为结构体，对其中的字段进行校验
 		return p.checkOutputParameterInvalid(paramType)
 	}
@@ -485,32 +480,37 @@ func (p *FileParser) checkOutputParameterInvalid(param *types.Param) error {
 	return nil
 }
 
-func (p *FileParser) parseFuncBody(body *ast.BlockStmt, fnDecl *types.FuncDecl, pkgInfo types.PackageInfo) error {
-	name := pkgInfo.ImportsMap[types.AnnotationPackageName]
-	sqlExpr, anno := astutils.FindCallsInBlockStmt(types.SQLAnnotationFuncs, name, body)
-	if sqlExpr == nil {
-		return errors.Errorf("SQL annotation not found")
+func (p *FileParser) parseAnnotations(fnDecl *types.FuncDecl) error {
+	if err := p.parseSQLAnnotation(fnDecl); err != nil {
+		return err
 	}
-	fnDecl.Annotation = anno
 
-	if len(sqlExpr.Args) != 1 {
-		return errors.Errorf("SQL annotation call is invalid, has more than 1 parameters")
-	}
+	// TODO 处理其它注解
+	return nil
+}
+
+// 解析SQL注解Select/Insert/Update/Delete中的静态或动态SQL
+func (p *FileParser) parseSQLAnnotation(fnDecl *types.FuncDecl) error {
+	var (
+		sqlExpr  = fnDecl.SQLAnnotation.CallExpr
+		annoName = fnDecl.SQLAnnotation.Name
+	)
 
 	// 静态sql
 	arg := sqlExpr.Args[0]
-	if sbl, ok := arg.(*ast.BasicLit); ok {
-		if sbl.Kind != token.STRING {
+	if lit, ok := arg.(*ast.BasicLit); ok {
+		if lit.Kind != token.STRING {
 			return errors.Errorf("sql is invalid")
 		}
-		sqlStr := strings.Trim(sbl.Value, "\r\n`\"")
+
+		sqlStr := strings.Trim(lit.Value, "\r\n`\"")
 		// 对sql进行解析, 解析出参数列表, 并替换为?
 		sqlInfo := sqlutils.ParseSQLStmt(sqlStr)
 		sqlStr = sqlInfo.SQL
 		fnDecl.SqlParseResult = sqlInfo
 
 		// 如果是select语句, 则需要找到select表字段和结构体字段的对应关系
-		if anno == types.SQLSelectFunc {
+		if annoName == types.SQLSelectFunc {
 			var err error
 			sqlStr, err = p.parseStaticSelectSqlStmt(sqlStr, fnDecl)
 			if err != nil {
@@ -546,7 +546,7 @@ func (p *FileParser) parseFuncBody(body *ast.BlockStmt, fnDecl *types.FuncDecl, 
 	}
 
 	// 如果是Select语句，处理SELECT *
-	if anno == types.SQLSelectFunc {
+	if annoName == types.SQLSelectFunc {
 		if err := p.parseDynamicSelectSqlStmt(sqls, fnDecl); err != nil {
 			return err
 		}
@@ -646,6 +646,12 @@ func (p *FileParser) parseDynamicSelectSqlStmt(sqls []types.SQL, fnDecl *types.F
 			break
 		}
 	}
+
+	return nil
+}
+
+// TODO
+func (p *FileParser) validateAnnotation(annotations []types.AnnotationInfo) error {
 
 	return nil
 }
